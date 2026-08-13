@@ -1,0 +1,63 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build-test:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: linux-gcc,     os: ubuntu-latest,  cc: gcc,   cxx: g++ }
+          - { name: linux-clang,   os: ubuntu-latest,  cc: clang, cxx: clang++ }
+          - { name: macos-clang,   os: macos-latest,   cc: clang, cxx: clang++ }
+          - { name: windows-msvc,  os: windows-latest, cc: cl,    cxx: cl }
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - name: Configure
+        env:
+          CC: ${{ matrix.cc }}
+          CXX: ${{ matrix.cxx }}
+        # ASPER_WITH_LLAMA=OFF keeps CI fast; the full suite is designed to
+        # pass without model inference (scripted curator + fake embedder).
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release -DASPER_WITH_LLAMA=OFF
+      - name: Build
+        run: cmake --build build --config Release -j 4
+      - name: Test
+        run: ctest --test-dir build -C Release --output-on-failure
+
+  sanitizers:
+    name: linux-asan-ubsan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - name: Configure
+        env: { CC: clang, CXX: clang++ }
+        run: >
+          cmake -B build -DCMAKE_BUILD_TYPE=Debug
+          -DASPER_WITH_LLAMA=OFF -DASPER_SANITIZERS=ON
+      - name: Build
+        run: cmake --build build -j 4
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
+  llama-build:
+    name: linux-with-llama (build only)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - name: Configure
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release -DASPER_WITH_LLAMA=ON -DASPER_BUILD_TESTS=OFF
+      - name: Build
+        run: cmake --build build -j 4

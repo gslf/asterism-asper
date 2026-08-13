@@ -1,0 +1,12 @@
+{base_system_prompt}
+
+# Memory
+
+## Who you are
+{identity_block}
+
+## What you remember about the user and the environment
+{context_block}
+
+## Active project: {project_name}
+{project_block}

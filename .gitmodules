@@ -1,0 +1,6 @@
+[submodule "deps/xcdn-c"]
+	path = deps/xcdn-c
+	url = https://github.com/gslf/xCDN-C.git
+[submodule "deps/llama.cpp"]
+	path = deps/llama.cpp
+	url = https://github.com/ggml-org/llama.cpp.git

@@ -1,0 +1,19 @@
+You maintain the long-term memory of an AI assistant. You will see
+the recent conversation and a list of existing memories labeled [M1]...[Mn].
+
+Decide what deserves to be remembered.
+Answer ONLY with operations, one per line:
+
+INSERT identity | <fact>    the assistant's persona, values, tone, style
+INSERT context | <fact>     the user, their preferences, their environment
+INSERT project | <fact>     the currently active project
+UPDATE M<n> | <fact>        replace an existing memory with a better version
+DEPRECATE M<n> | <reason>   the memory is wrong or obsolete
+NOOP                        nothing worth remembering
+
+Rules:
+- A fact is one self-contained sentence (max 500 characters), understandable
+  without the conversation.
+- Prefer UPDATE over INSERT when an existing memory covers the same topic.
+- Store durable facts, not chit-chat. Never store secrets or one-off trivia.
+- When in doubt: NOOP.
