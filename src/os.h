@@ -18,6 +18,46 @@
 
 #include "asper.h" /* asper_err */
 
+/* Link-time prefix: libasper coexists in one process with its siblings'
+ * identically-named OS shims, so every shim symbol is renamed to
+ * asper_x_* at compile time. Call sites keep the short names. */
+#define os_thread_start       asper_x_thread_start
+#define os_thread_join        asper_x_thread_join
+#define os_mutex_init         asper_x_mutex_init
+#define os_mutex_destroy      asper_x_mutex_destroy
+#define os_mutex_lock         asper_x_mutex_lock
+#define os_mutex_unlock       asper_x_mutex_unlock
+#define os_cond_init          asper_x_cond_init
+#define os_cond_destroy       asper_x_cond_destroy
+#define os_cond_timedwait     asper_x_cond_timedwait
+#define os_cond_wait          asper_x_cond_wait
+#define os_cond_signal        asper_x_cond_signal
+#define os_cond_broadcast     asper_x_cond_broadcast
+#define os_rwlock_init        asper_x_rwlock_init
+#define os_rwlock_destroy     asper_x_rwlock_destroy
+#define os_rwlock_rdlock      asper_x_rwlock_rdlock
+#define os_rwlock_rdunlock    asper_x_rwlock_rdunlock
+#define os_rwlock_wrlock      asper_x_rwlock_wrlock
+#define os_rwlock_wrunlock    asper_x_rwlock_wrunlock
+#define os_file_replace       asper_x_file_replace
+#define os_fsync              asper_x_fsync
+#define os_mkdir_p            asper_x_mkdir_p
+#define os_file_exists        asper_x_file_exists
+#define os_read_file          asper_x_read_file
+#define os_write_file         asper_x_write_file
+#define os_remove_file        asper_x_remove_file
+#define os_truncate           asper_x_truncate
+#define os_file_size          asper_x_file_size
+#define os_rename             asper_x_rename
+#define os_list_dir           asper_x_list_dir
+#define os_fopen              asper_x_fopen
+#define os_now_unix           asper_x_now_unix
+#define os_monotonic_ms       asper_x_monotonic_ms
+#define os_random_bytes       asper_x_random_bytes
+#define os_hardware_threads   asper_x_hardware_threads
+#define os_path_join          asper_x_path_join
+
+
 #ifdef __cplusplus
 extern "C" {
 #endif

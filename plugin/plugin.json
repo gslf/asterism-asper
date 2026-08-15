@@ -1,0 +1,14 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "asper",
+  "version": "0.1.0",
+  "description": "Identitarian long-term memory for LLM agents: local, offline, self-curated. Exposes the asper-mcp memory server plus a skill teaching the memory workflow.",
+  "author": {
+    "name": "Gioele Stefano Luca Fierro",
+    "url": "https://github.com/gslf"
+  },
+  "homepage": "https://github.com/gslf/asterism-asper",
+  "repository": "https://github.com/gslf/asterism-asper",
+  "license": "MIT",
+  "keywords": ["memory", "identity", "persistence", "mcp", "offline", "llm"]
+}

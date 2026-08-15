@@ -1,23 +1,13 @@
 # ⁂ asper — asterism persistence
 
-An identitarian memory system for small LLMs. *Per aspera ad astra.*
+An identitarian memory system for LLMs. 
 
-Asper is a local, self-curated long-term memory subsystem for small language
-models (1–8 B). It gives a host model a durable sense of **who it is** (identity),
-**who it is talking to** (context), and **what it is working on** (projects), by
-maintaining a retrieval-augmented memory that is written, reorganized and pruned
-autonomously by a second, even smaller local *curator* model.
+Asper is a local, self-curated long-term memory subsystem for language models, with a specific focus on the smaller ones. It gives a host model  a durable sense of **who it is** (identity), **who it is talking to** (context), and **what it is working on** (projects), by maintaining a retrieval-augmented memory that is written, reorganized and pruned autonomously by a second, micro local *curator* model.
 
-- **Identitarian**: identity is the always-present first layer — persona, values,
-  tone and style are injected into every prompt.
-- **Human-inspectable**: the store is plain [xCDN](https://github.com/gslf/xCDN)
-  text you can open and hand-edit.
-- **Crash-safe**: append-only journal + atomic compaction.
-- **Fully offline**: curator inference and embeddings run in-process via
-  llama.cpp; no network, ever.
-- **Non-blocking**: curation runs on a worker thread; the host loop never waits.
+Identity is the always-present first layer. The store is plain [xCDN](https://github.com/gslf/xCDN), so it's easy to inspect and edit. Curator inference and embeddings run in-process via llama.cpp, on a worker thread.
 
 Full specification: [docs/SPEC.txt](docs/SPEC.txt).
+
 
 ## Deliverables
 
@@ -39,6 +29,7 @@ ctest --test-dir build --output-on-failure
 CMake options: `ASPER_BUILD_MCP` (ON), `ASPER_BUILD_TESTS` (ON),
 `ASPER_NO_THREADS` (OFF), `ASPER_SANITIZERS` (OFF), `ASPER_WITH_LLAMA` (ON —
 set OFF for a fast, inference-less build; the full test suite passes either way).
+
 
 ## Models
 
@@ -79,6 +70,10 @@ asper-mcp --root ./memory [--config config.xcdn]
 Tools: `memory_search`, `memory_recall`, `memory_insert`, `memory_update`,
 `memory_deprecate`, `memory_list`, `project_select`, `project_list`,
 `observe_turn`, `context_build`, `memory_stats`.
+
+## Agent Plugin
+
+[plugin/](plugin/) packages the MCP server and an `asper-memory` usage skill in the [Agent Plugins 1.0](https://agent-plugins.org/) format, consumable by any compatible client (VS Code, Cursor, GitHub Copilot, ChatGPT & Codex, Kiro, …). It expects `asper-mcp` on the PATH and keeps the memory store in the client-managed plugin data directory; see [plugin/README.md](plugin/README.md).
 
 ## License
 

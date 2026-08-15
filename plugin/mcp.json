@@ -1,0 +1,11 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json",
+  "mcpServers": {
+    "asper": {
+      "type": "stdio",
+      "command": "asper-mcp",
+      "args": ["--root", "${PLUGIN_DATA}/memory"],
+      "cwd": "${PLUGIN_DATA}"
+    }
+  }
+}

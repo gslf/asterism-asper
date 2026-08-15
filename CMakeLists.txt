@@ -33,10 +33,14 @@ endif()
 # xCDN-C: official parser/serializer for all persistent text (D3). With
 # tests enabled its own test/example targets build too (its add_test entries
 # are registered either way, so they must be buildable to run).
-if(ASPER_BUILD_TESTS)
-  add_subdirectory(deps/xcdn-c)
-else()
-  add_subdirectory(deps/xcdn-c EXCLUDE_FROM_ALL)
+# Guarded so an embedding host (e.g. asngn) that already provides the xcdn
+# target can add this project via add_subdirectory without a collision.
+if(NOT TARGET xcdn)
+  if(ASPER_BUILD_TESTS)
+    add_subdirectory(deps/xcdn-c)
+  else()
+    add_subdirectory(deps/xcdn-c EXCLUDE_FROM_ALL)
+  endif()
 endif()
 
 # llama.cpp: curator inference + embeddings (consumed via its C API only).
