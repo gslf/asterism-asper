@@ -1,5 +1,5 @@
 /*
- * asper_test.h — minimal test harness for Asper (spec §16: ~100 LOC, no
+ * asper_test.h — minimal test harness for Asper (~100 LOC, no
  * framework dependency).
  *
  * Usage:

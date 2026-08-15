@@ -38,7 +38,7 @@ static asper_ctx *open_store(const char *root, const char *config) {
 }
 
 /* Seed identity out of created_at order: I2 first (unlocked), then I1
- * (locked). §6.1 orders locked first, so I1 must render before I2. */
+ * (locked). Locked entries render first, so I1 must render before I2. */
 static int seed_identity(asper_ctx *c) {
   char id[37];
   fake_clock_set(&g_clk, T0);

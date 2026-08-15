@@ -321,10 +321,10 @@ static xcdn_value_t *xstr_esc(const char *s) {
 
 /* ═══════════════════════ record -> node ═══════════════════════ */
 
-/* Build a #memory-tagged node with every §3.1 field in order (project and
+/* Build a #memory-tagged node with every field in order (project and
  * supersedes serialize as null when absent). deprecated_at is emitted after
  * status for deprecated records only: it is required to preserve the purge
- * clock across compaction and reload; active records keep the exact §3.1
+ * clock across compaction and reload; active records keep the exact
  * shape. */
 static xcdn_node_t *record_build_node(const asper_record *r) {
   xcdn_value_t *obj = xcdn_value_object();
@@ -585,7 +585,7 @@ asper_err asper_record_from_node(asper_ctx *c, const void *xcdn_node,
   if (asper_str_blank(r->content))
     REC_FAIL("record %s: empty content", r->id);
 
-  /* optional fields with §3.1 defaults */
+  /* optional fields with their defaults */
   v = obj_field(obj, "source");
   if (v) {
     s = val_str(v);

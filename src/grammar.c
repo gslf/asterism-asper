@@ -1,9 +1,9 @@
 /*
  * grammar.c — per-cycle GBNF generation + curator op-protocol parsing.
  *
- * Owns the built-in curator instructions (SPEC Appendix C; the default
- * instruction is byte-identical to docs/curator_instruction.txt) and the
- * three per-cycle grammar shapes (SPEC Appendix A, §7.4, §7.6, §7.7).
+ * Owns the built-in curator instructions (the default instruction is
+ * byte-identical to docs/curator_instruction.txt) and the three
+ * per-cycle grammar shapes.
  * Pure functions: no context, no locking, no I/O.
  */
 
@@ -90,7 +90,7 @@ static asper_err gbnf_handle_rule(asper_buf *b, size_t handle_count)
 char *asper_gbnf_build(asper_grammar_kind kind, size_t handle_count,
                        int content_max_chars)
 {
-  /* content_max_chars is enforced by the engine guardrails (§7.5), never by
+  /* content_max_chars is enforced by the engine guardrails, never by
    * the grammar; the parameter is kept for a future length-bounded rule. */
   (void)content_max_chars;
 

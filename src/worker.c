@@ -1,7 +1,7 @@
 /*
  * worker.c — event queue, curation triggers, worker thread / asper_tick.
  *
- * Owns the background scheduling policy (SPEC §7.2, §8): the worker loop,
+ * Owns the background scheduling policy: the worker loop,
  * the access-boost batch, and the shared cycle-slot helpers. The cycle-slot
  * protocol itself is specified in asper_internal.h.
  */
@@ -199,7 +199,7 @@ static void *asper_worker_main(void *arg) {
                            : last_review_try;
     bool maint_due = c->cfg.maintenance_interval_s > 0 &&
                      now - mbase >= c->cfg.maintenance_interval_s;
-    /* Defer new cycles while a recall is waiting (§7.7 priority). */
+    /* Defer new cycles while a recall is waiting (recall takes priority). */
     bool can_work = c->has_curator && !c->cycle_busy &&
                     c->recall_waiting == 0;
     int64_t wait_ms;

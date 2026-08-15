@@ -1,4 +1,4 @@
-# tests/CMakeLists.txt — one CTest executable per test_*.c (spec §16).
+# tests/CMakeLists.txt — one CTest executable per test_*.c.
 #
 # The strict-flag list mirrors the top-level ASPER_C_FLAGS convention; it is
 # recreated here because the parent-scope variable may not propagate.

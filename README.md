@@ -6,7 +6,7 @@ Asper is a local, self-curated long-term memory subsystem for language models, w
 
 Identity is the always-present first layer. The store is plain [xCDN](https://github.com/gslf/xCDN), so it's easy to inspect and edit. Curator inference and embeddings run in-process via llama.cpp, on a worker thread.
 
-Full specification: [docs/SPEC.txt](docs/SPEC.txt).
+Full specification: [docs/SPECS.md](docs/SPECS.md).
 
 
 ## Deliverables
@@ -26,21 +26,33 @@ cmake --build build -j
 ctest --test-dir build --output-on-failure
 ```
 
-CMake options: `ASPER_BUILD_MCP` (ON), `ASPER_BUILD_TESTS` (ON),
-`ASPER_NO_THREADS` (OFF), `ASPER_SANITIZERS` (OFF), `ASPER_WITH_LLAMA` (ON —
-set OFF for a fast, inference-less build; the full test suite passes either way).
+CMake options: `ASPER_BUILD_MCP` (ON), `ASPER_BUILD_TESTS` (ON), `ASPER_NO_THREADS` (OFF), `ASPER_SANITIZERS` (OFF), `ASPER_WITH_LLAMA` (ON — set OFF for a fast, inference-less build, the full test suite passes either way).
 
 
-## Models
+## Configuration
 
-Asper needs two GGUF models at the paths set in `config.xcdn` (§11 of the spec):
+Everything Asper needs beyond the memory root — model paths, token budgets, retrieval weights, curation timing, decay, logging — comes from one optional file: `config.xcdn`. 
 
-- Curator (default): `models/qwen2.5-1.5b-instruct-q4_k_m.gguf`
-- Embeddings (default): `models/multilingual-e5-small-q8_0.gguf`
+```sh
+asper-mcp --root ./memory --config config.xcdn
+```
 
-When a model file is missing, `asper_open` logs a warning and continues in
-degraded mode (identity injection still works; retrieval/curation/recall are
-disabled until models are available).
+```c
+asper_open_params p = { .memory_root = "./memory", .config_path = "config.xcdn" };
+```
+
+Every key is optional and already has a sensible default, so you only need to write the ones you want to change; unknown keys are ignored with a warning, wrong types fail `asper_open` with `ASPER_ERR_CONFIG`. A fully-documented copy with every key spelled out at its default value ships at [config.xcdn](config.xcdn) in this repo — copy it and trim it down to what you actually want to override.
+
+### Models
+
+The two GGUF models Asper needs are just two keys in that file: `curator.model_path` and `embedding.model_path`. Relative paths are
+resolved against the **current working directory of the process**. With no config
+file at all, the defaults are:
+
+- Curator: `models/qwen2.5-1.5b-instruct-q4_k_m.gguf`
+- Embeddings: `models/multilingual-e5-small-q8_0.gguf`
+
+When a model file is missing, `asper_open` logs a warning and continues in degraded mode (identity injection still works; retrieval/curation/recall are disabled until models are available).
 
 ## Quick start (C API)
 
@@ -67,9 +79,7 @@ asper_close(ctx);
 asper-mcp --root ./memory [--config config.xcdn]
 ```
 
-Tools: `memory_search`, `memory_recall`, `memory_insert`, `memory_update`,
-`memory_deprecate`, `memory_list`, `project_select`, `project_list`,
-`observe_turn`, `context_build`, `memory_stats`.
+Tools: `memory_search`, `memory_recall`, `memory_insert`, `memory_update`, `memory_deprecate`, `memory_list`, `project_select`, `project_list`, `observe_turn`, `context_build`, `memory_stats`.
 
 ## Agent Plugin
 

@@ -1,5 +1,5 @@
 /*
- * inject.c — budgets, template render, token estimation (spec §6, App. B).
+ * inject.c — budgets, template render, token estimation.
  *
  * Rendering contract (IMPLEMENTATION_NOTES "Injection rendering"):
  *   - Each record renders as "- <content>\n"; the block substituted for a
@@ -73,7 +73,7 @@ int asper_estimate_tokens(asper_ctx *c, const char *text)
   return asper_token_heuristic(text);
 }
 
-/* Tokens of the rendered record line "- <content>\n" (§6.1: budgets count
+/* Tokens of the rendered record line "- <content>\n" (budgets count
  * record lines; headings are free). */
 static int record_line_tokens(asper_ctx *c, const char *content,
                               asper_err *err)
@@ -105,7 +105,7 @@ static void mark_dropped(asper_record *const *recs, size_t from, size_t n)
 }
 
 /* Keep the longest prefix whose cumulative line-token total fits budget
- * (§6.1 "drop from the tail": arrays arrive already precedence-ordered);
+ * ("drop from the tail": arrays arrive already precedence-ordered);
  * mark everything after the cut as dropped. */
 static asper_err section_trim(asper_ctx *c, asper_record *const *recs,
                               size_t n, int budget, size_t *out_kept)

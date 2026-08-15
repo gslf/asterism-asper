@@ -1,6 +1,6 @@
 /*
  * curator.c — curation cycles, curator-side guardrails, identity quorum,
- * maintenance review and recall (SPEC §7, §3.4).
+ * maintenance review and recall.
  *
  * Every entry point here runs holding the cycle slot (worker thread, or the
  * caller in ASPER_NO_THREADS / asper_flush(full) paths), so cycles never
@@ -39,7 +39,7 @@ typedef enum {
 } cycle_op_result;
 
 /* Identity proposals recorded during the current cycle, so a duplicate line
- * in the same output cannot self-confirm ("later cycle" rule, §7.5). */
+ * in the same output cannot self-confirm (the "later cycle" rule). */
 typedef struct {
   char id[37];
   asper_op_kind kind;
@@ -164,7 +164,7 @@ static char *turn_line(const asper_turn *t)
 }
 
 /* .score desc, id asc (determinism for handle ordering); collect_related
- * stores the cosine in .score, so this is the §7.3 similarity order. */
+ * stores the cosine in .score, so this is similarity order. */
 static int rec_score_desc_cmp(const void *pa, const void *pb)
 {
   const asper_record *a = *(asper_record *const *)pa;
@@ -176,7 +176,7 @@ static int rec_score_desc_cmp(const void *pa, const void *pb)
   return strcmp(a->id, b->id);
 }
 
-/* eff asc (stored in .score), id asc — review candidate order (§7.6). */
+/* eff asc (stored in .score), id asc — review candidate order. */
 static int rec_eff_asc_cmp(const void *pa, const void *pb)
 {
   const asper_record *a = *(asper_record *const *)pa;
@@ -188,9 +188,9 @@ static int rec_eff_asc_cmp(const void *pa, const void *pb)
   return strcmp(a->id, b->id);
 }
 
-/* ---- related-memory collection (§7.3) ----------------------------------- */
+/* ---- related-memory collection ------------------------------------------- */
 
-/* Per-turn top-3 retrieval in SIMILARITY order (§7.3), union by id keeping
+/* Per-turn top-3 retrieval in SIMILARITY order, union by id keeping
  * the best cosine (clones carry it in .score via score_is_cos), capped at
  * 12 in cos desc, id asc order. Returned clones are owned by the caller. */
 static asper_err collect_related(asper_ctx *c, const asper_turn *turns,
@@ -258,7 +258,7 @@ static asper_err collect_related(asper_ctx *c, const asper_turn *turns,
   return ASPER_OK;
 }
 
-/* ---- cycle prompt (§7.3) ------------------------------------------------- */
+/* ---- cycle prompt --------------------------------------------------------- */
 
 static asper_err build_cycle_prompt(asper_ctx *c, asper_record *const *mems,
                                     size_t n_mems, const asper_turn *turns,
@@ -325,7 +325,7 @@ static asper_err build_cycle_prompt(asper_ctx *c, asper_record *const *mems,
   return *out ? ASPER_OK : ASPER_ERR_NOMEM;
 }
 
-/* ---- identity quorum (§7.5, D5) ------------------------------------------ */
+/* ---- identity quorum ------------------------------------------------------ */
 
 /* Prune expired pendings, then either confirm-and-remove a matching entry
  * from an earlier cycle (*confirmed = true) or record a new pending. */
@@ -418,7 +418,7 @@ static cycle_op_result cycle_do_insert(asper_ctx *c, const asper_cop *cop,
     return CYCLE_OP_REJECTED;
   }
 
-  /* Dedup (§7.5): only with an embedder; a hit converts the insert into an
+  /* Dedup: only with an embedder; a hit converts the insert into an
    * access boost on the existing record. */
   if (c->has_embedder && c->embedder.dim > 0) {
     float *vec = malloc((size_t)c->embedder.dim * sizeof *vec);
@@ -437,7 +437,7 @@ static cycle_op_result cycle_do_insert(asper_ctx *c, const asper_cop *cop,
       double dup_cos = 0.0;
       os_rwlock_rdlock(&c->lock);
       /* rank_by_cos: the dedup winner is the max-cosine record clearing
-       * dup_threshold (§7.5), not the best composite score. */
+       * dup_threshold, not the best composite score. */
       size_t nh = asper_index_scan(
           &c->index, &c->cfg, &c->clock, vec, cop->section,
           cop->section == ASPER_SECTION_PROJECT ? project : NULL, 1,
@@ -615,7 +615,7 @@ static void cycle_epilogue(asper_ctx *c)
   }
 }
 
-/* ---- curation cycle (§7.2-§7.5) ------------------------------------------ */
+/* ---- curation cycle ------------------------------------------------------- */
 
 asper_err asper_curation_cycle(asper_ctx *c, bool force)
 {
@@ -771,7 +771,7 @@ fail:
   goto out;
 }
 
-/* ---- maintenance review (§7.6) ------------------------------------------- */
+/* ---- maintenance review --------------------------------------------------- */
 
 /* Active, unlocked, non-identity records with eff < prune_threshold; clones
  * with eff stashed in .score, sorted eff asc, capped at review_batch. */
@@ -987,7 +987,7 @@ out:
   return rc;
 }
 
-/* ---- recall (§7.7) ------------------------------------------------------- */
+/* ---- recall --------------------------------------------------------------- */
 
 static asper_err build_recall_prompt(const char *question,
                                      asper_record *const *cands, size_t n,

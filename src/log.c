@@ -1,5 +1,5 @@
 /*
- * log.c — leveled rotating file log + host callback fan-out (§15).
+ * log.c — leveled rotating file log + host callback fan-out.
  *
  * Sink independence: the file sink is gated by cfg.log_level; the host
  * callback receives EVERY record at any level and filters on its own. The

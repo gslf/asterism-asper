@@ -1,5 +1,5 @@
 /* test_stats_projects.c — projects: select/create/list/persistence and the
- * projects.autocreate gate (D1); stats counters across the lifecycle. */
+ * projects.autocreate gate; stats counters across the lifecycle. */
 
 #include "asper_test.h"
 

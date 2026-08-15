@@ -27,7 +27,7 @@
  *   curator_llama.c llama.cpp curator backend (ASPER_WITH_LLAMA)
  *   os_common.c / os_posix.c / os_win32.c   platform shim (os.h)
  *
- * Locking protocol (§8): c->lock guards table + index + active_project +
+ * Locking protocol: c->lock guards table + index + active_project +
  * stats + pending set. c->ev_mu guards the event queue, access batch and
  * worker signaling. c->journal_mu guards journal/audit appends. Lock order:
  * lock -> journal_mu; ev_mu is never held while taking lock (copy out, then
@@ -205,7 +205,7 @@ typedef struct {
   char *curator_model_path;
   int curator_ctx;
   int curator_threads;
-  char *instruction_path;      /* NULL = built-in Appendix C */
+  char *instruction_path;      /* NULL = built-in default */
   /* embedding */
   char *embed_model_path;
   int embed_dim;
@@ -215,7 +215,7 @@ typedef struct {
   int identity_tokens, context_tokens, project_tokens;
   /* injection */
   int token_estimator;         /* ASPER_TOKENS_* */
-  char *template_path;         /* NULL = built-in Appendix B */
+  char *template_path;         /* NULL = built-in default */
   /* retrieval */
   int k_context, k_project;
   double min_similarity, w_similarity, w_relevance, w_recency;
@@ -244,7 +244,7 @@ typedef struct {
   bool autocreate;
 } asper_config;
 
-void      asper_config_defaults(asper_config *cfg); /* §11 values */
+void      asper_config_defaults(asper_config *cfg);
 /* Overlay path (xCDN #asper_config) onto cfg; unknown keys warn via log,
  * wrong types => ASPER_ERR_CONFIG. path NULL => defaults only. */
 asper_err asper_config_load(asper_ctx *c, asper_config *cfg,
@@ -346,8 +346,8 @@ void      asper_store_close(asper_ctx *c); /* close streams, free table */
 /* Apply one op to the table only (no journal, no index): shared by replay
  * and live apply. INSERT takes ownership of op->record on success. */
 asper_err asper_store_apply(asper_ctx *c, asper_op *op);
-/* Rewrite section files + purge + reset journal + manifest bump (§4.6).
- * Caller must hold no locks (takes them internally per §8). */
+/* Rewrite section files + purge + reset journal + manifest bump.
+ * Caller must hold no locks (takes them internally). */
 asper_err asper_store_compact(asper_ctx *c);
 bool      asper_store_project_known(const asper_ctx *c, const char *slug);
 /* Register slug in the in-memory list (idempotent). */
@@ -393,10 +393,10 @@ typedef struct {
 /* Scan: active records matching section (ANY = identity + context + the
  * given project; PROJECT records never match a NULL project). Fills hits
  * with cos + score (scored via decay.c), capped at k; min_sim excludes
- * below-floor cosine. rank_by_cos == 0: ordered per §5.3 determinism
+ * below-floor cosine. rank_by_cos == 0: ordered deterministically
  * (score desc, updated_at desc, id asc); rank_by_cos != 0: ordered by cos
- * desc, updated_at desc, id asc — used where the spec mandates
- * similarity order (§7.3 related memories, §7.5 dedup winner). Returns
+ * desc, updated_at desc, id asc — used where similarity order is
+ * required (related memories, dedup winner). Returns
  * count. Caller holds the read lock. */
 size_t asper_index_scan(const asper_index *ix, const asper_config *cfg,
                         const asper_clock *clk, const float *qvec,
@@ -407,13 +407,13 @@ size_t asper_index_scan(const asper_index *ix, const asper_config *cfg,
 /* ═══════════════════════ decay.c ═══════════════════════ */
 
 int64_t asper_half_life_s(const asper_config *cfg, asper_section s);
-/* eff(m, t) — §3.4; identity: no decay. */
+/* eff(m, t); identity: no decay. */
 double  asper_eff_relevance(const asper_config *cfg, const asper_record *r,
                             asper_time now);
-/* score(m, q) — §5.3. */
+/* score(m, q). */
 double  asper_score_record(const asper_config *cfg, const asper_record *r,
                            double cos, asper_time now);
-/* Deterministic tie-break (§5.3): score desc, updated_at desc, id asc.
+/* Deterministic tie-break: score desc, updated_at desc, id asc.
  * Returns <0 if a ranks before b. */
 int     asper_hit_cmp(const asper_hit *a, const asper_hit *b);
 
@@ -436,7 +436,7 @@ typedef struct {
   void *ud;
   /* Greedy generation constrained by gbnf (NULL = unconstrained).
    * *out_text malloc'd. Never called concurrently: every call site holds
-   * the cycle slot (§7.7 protocol below) — but the calling THREAD varies
+   * the cycle slot (see the protocol below) — but the calling THREAD varies
    * (worker for cycles, host threads for recall/flush), so backends must
    * not assume thread affinity. */
   asper_err (*generate)(void *ud, const char *system_prompt,
@@ -455,15 +455,15 @@ asper_err asper_curator_llama_create(asper_ctx *c, asper_curator_iface *out);
 /* ═══════════════════════ retrieve.c ═══════════════════════ */
 
 /* Embed the query (is_query=1, caller thread), scan under the read lock,
- * return CLONES with .score set, ordered per §5.3. No embedder available =>
+ * return CLONES with .score set, ordered deterministically. No embedder available =>
  * 0 results, ASPER_OK. s may be ASPER_SECTION_ANY (recall/search). */
 asper_err asper_retrieve(asper_ctx *c, const char *query, asper_section s,
                          const char *project, size_t k, double min_sim,
                          asper_record ***out, size_t *out_n);
 /* As asper_retrieve, but when score_is_cos != 0 selection and ordering use
  * the raw cosine (asper_index_scan rank_by_cos) and the clones' .score
- * carries that cosine — for call sites where the spec mandates similarity
- * order (§7.3, §7.5). */
+ * carries that cosine — for call sites that require similarity
+ * order. */
 asper_err asper_retrieve_ex(asper_ctx *c, const char *query, asper_section s,
                             const char *project, size_t k, double min_sim,
                             int score_is_cos, asper_record ***out,
@@ -483,9 +483,9 @@ asper_err asper_collect_list(asper_ctx *c, asper_section s,
  * falls back to heuristic when no curator is available). */
 int asper_estimate_tokens(asper_ctx *c, const char *text);
 
-/* Render base + memory block (§6.2). identity/ctx/proj arrays are already
+/* Render base + memory block. identity/ctx/proj arrays are already
  * retrieval-ordered clones owned by the caller; inject trims whole records
- * to the budgets with the §6.1 precedence, drops empty sections, returns
+ * to the budgets with precedence, drops empty sections, returns
  * base unchanged (copy) when all empty. Deterministic. */
 asper_err asper_inject_render(asper_ctx *c, const char *base_system_prompt,
                               asper_record *const *identity, size_t id_n,
@@ -493,11 +493,11 @@ asper_err asper_inject_render(asper_ctx *c, const char *base_system_prompt,
                               asper_record *const *proj, size_t proj_n,
                               const char *project_name, char **out_prompt);
 
-/* Identity injection order (§6.1): locked first, then relevance desc,
+/* Identity injection order: locked first, then relevance desc,
  * created_at asc, id asc. qsort comparator over asper_record*. */
 int asper_identity_cmp(const void *a, const void *b);
 
-/* Built-in template (Appendix B) as a C string. */
+/* Built-in template as a C string. */
 extern const char ASPER_DEFAULT_TEMPLATE[];
 
 /* ═══════════════════════ grammar.c ═══════════════════════ */
@@ -537,7 +537,7 @@ asper_err asper_protocol_parse(const char *text, size_t handle_count,
                                size_t *out_bad);
 void asper_cops_free(asper_cop *ops, size_t n);
 
-/* Built-in curator instruction (Appendix C) as a C string. */
+/* Built-in curator instruction as a C string. */
 extern const char ASPER_DEFAULT_INSTRUCTION[];
 extern const char ASPER_REVIEW_INSTRUCTION[];
 extern const char ASPER_RECALL_INSTRUCTION[];
@@ -550,7 +550,7 @@ typedef struct {
   asper_time at;
 } asper_turn;
 
-/* Curator-execution scheduling (§7.7, §8): every curator generation —
+/* Curator-execution scheduling: every curator generation —
  * curation cycle, maintenance review, recall — runs holding the "cycle
  * slot": under ev_mu, wait until !cycle_busy, set it, run WITHOUT ev_mu,
  * clear it, broadcast done_cv. Recall increments recall_waiting while
@@ -581,12 +581,12 @@ typedef struct {
 } asper_pending;
 
 /* One curation cycle over up to cfg.turn_batch queued turns (all of them
- * when force). Builds prompt (§7.3), runs curator, validates (§7.5),
+ * when force). Builds prompt, runs curator, validates,
  * applies via asper_apply_op. No-op when no turns queued. */
 asper_err asper_curation_cycle(asper_ctx *c, bool force);
-/* Maintenance review (§7.6). `force` ignores the interval gate. */
+/* Maintenance review. `force` ignores the interval gate. */
 asper_err asper_maintenance_review(asper_ctx *c, bool force);
-/* Recall (§7.7), executed on the worker (or synchronously without
+/* Recall, executed on the worker (or synchronously without
  * threads). */
 asper_err asper_recall_run(asper_ctx *c, const char *question,
                            char **out_answer, asper_record ***out_cited,
@@ -604,10 +604,10 @@ asper_err asper_open_with(const asper_open_params *p,
                           const asper_curator_iface *cur,
                           const asper_clock *clk, asper_ctx **out);
 
-/* THE single mutation funnel (§8): validate, journal-append, apply to
+/* THE single mutation funnel: validate, journal-append, apply to
  * table, maintain index/embeddings (INSERT/UPDATE re-embed via the
  * embedder; DEPRECATE removes the row), update stats. Takes the write lock
- * internally. `from_curator` selects guardrail behavior (§7.5) for
+ * internally. `from_curator` selects guardrail behavior for
  * quorum/caps accounting. Frees/owns op members per asper_store_apply. */
 asper_err asper_apply_op(asper_ctx *c, asper_op *op, bool from_curator);
 
@@ -638,7 +638,7 @@ struct asper_ctx {
 
   char *active_project;         /* owned, NULL = none */
 
-  /* concurrency (§8) */
+  /* concurrency */
   os_rwlock lock;               /* table + index + active_project + stats */
   os_mutex journal_mu;
   os_mutex err_mu;

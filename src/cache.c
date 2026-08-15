@@ -1,5 +1,5 @@
 /*
- * cache.c — embeddings.bin read/write (spec §4.5).
+ * cache.c — embeddings.bin read/write.
  *
  * On-disk layout, little-endian regardless of host:
  *
@@ -30,7 +30,7 @@
 
 #include "asper_internal.h"
 
-/* §4.5 stores raw IEEE-754 single precision. */
+/* The on-disk format stores raw IEEE-754 single precision. */
 typedef char asper_assert_float32[(sizeof(float) == 4) ? 1 : -1];
 
 #define ASPER_CACHE_MAGIC "ASPE"
@@ -306,7 +306,7 @@ asper_err asper_cache_save(asper_ctx *c)
 
     asper_buf_init(&snap);
 
-    /* Snapshot phase (§8): table + index rows are guarded by c->lock, so
+    /* Snapshot phase: table + index rows are guarded by c->lock, so
      * header + entries are serialized into memory under the WRITE lock.
      * cache_dirty is cleared inside the same critical section: marks set
      * by mutations that land after this point survive the save. Any

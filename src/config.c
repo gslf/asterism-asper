@@ -1,5 +1,5 @@
 /*
- * config.c — built-in defaults (SPEC §11) and config.xcdn overlay loading.
+ * config.c — built-in defaults and config.xcdn overlay loading.
  *
  * The config file is parsed with xCDN-C. Three top-level shapes are accepted:
  * a tagged object (#asper_config { ... }), a bare top-level object, and the
@@ -19,7 +19,7 @@
 #include "asper_internal.h"
 #include "xcdn.h"
 
-/* ─────────────────────────── defaults (§11) ─────────────────────────── */
+/* ──────────────────────────────── defaults ──────────────────────────────── */
 
 void asper_config_defaults(asper_config *cfg) {
   if (!cfg) return;

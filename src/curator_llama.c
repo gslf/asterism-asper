@@ -1,5 +1,5 @@
 /*
- * curator_llama.c — llama.cpp curator backend (spec §7.1, §12).
+ * curator_llama.c — llama.cpp curator backend.
  *
  * Greedy, grammar-constrained generation over a small instruct GGUF.
  * Prompts go through the model's embedded chat template

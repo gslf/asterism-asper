@@ -1,5 +1,5 @@
 /*
- * index.c — flat in-memory cosine index (spec §5.2).
+ * index.c — flat in-memory cosine index.
  *
  * One contiguous float32[n x dim] matrix plus a parallel asper_record*
  * array; recs[i]->emb_row == i is the maintained invariant. Rows are
@@ -132,7 +132,7 @@ double asper_cosine(const float *a, const float *b, int dim)
     return acc;
 }
 
-/* Section/project/status filter (§5.2, §5.3):
+/* Section/project/status filter:
  * - deprecated records never match;
  * - ANY spans all sections (identity included), but a PROJECT record only
  *   matches when the project parameter is non-NULL and equal — so an
@@ -152,7 +152,7 @@ static bool asper_scan_match(const asper_record *r, asper_section section,
 }
 
 /* cos desc, updated_at desc, id asc — similarity order for the call sites
- * where the spec mandates it (§7.3 related memories, §7.5 dedup winner). */
+ * that require it (related memories, dedup winner). */
 static int asper_hit_cmp_cos(const asper_hit *a, const asper_hit *b)
 {
     if (a->cos > b->cos)
@@ -195,9 +195,9 @@ size_t asper_index_scan(const asper_index *ix, const asper_config *cfg,
         h.cos = cos;
         h.score = asper_score_record(cfg, r, cos, now);
 
-        /* Ordered insertion into the top-k array; k is small (§5.3).
+        /* Ordered insertion into the top-k array; k is small.
          * Selection and order follow the active ranking: composite score
-         * (§5.3 determinism) or raw cosine when rank_by_cos != 0. */
+         * (deterministic) or raw cosine when rank_by_cos != 0. */
         pos = count;
         while (pos > 0 &&
                (rank_by_cos ? asper_hit_cmp_cos(&h, &hits[pos - 1])

@@ -1,5 +1,5 @@
 /*
- * manifest.c — manifest.xcdn read/write (SPEC §4.4) via xCDN-C.
+ * manifest.c — manifest.xcdn read/write via xCDN-C.
  *
  * Load: a missing file initializes a fresh manifest (store_version 1,
  * created_at = ctx clock now, no embedding block) and persists it at once.

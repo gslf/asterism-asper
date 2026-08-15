@@ -1,5 +1,5 @@
-/* test_review_recall.c — maintenance review via time travel (§7.6) and the
- * recall channel (§7.7) through the scripted fake curator. */
+/* test_review_recall.c — maintenance review via time travel and the
+ * recall channel through the scripted fake curator. */
 
 #include "asper_test.h"
 

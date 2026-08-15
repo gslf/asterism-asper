@@ -1,0 +1,105 @@
+// config.xcdn — standard configuration reference for Asper.
+//
+// Every key below is optional and shown at its built-in default: an empty
+// file (or omitting --config entirely) behaves identically to this one.
+// Copy this file, keep only the keys you actually want to change, and pass
+// it explicitly:
+//
+//   asper-mcp --root ./memory --config config.xcdn
+//   asper_open_params p = { .memory_root = "./memory", .config_path = "config.xcdn" };
+//
+// Unknown keys are ignored with a warning. Wrong types or out-of-range
+// values fail asper_open with ASPER_ERR_CONFIG.
+
+#asper_config {
+
+  storage: {
+    journal_sync: "batch",   // "batch" | "always" | "never" — fsync policy
+    journal_max_ops: 2048,   // rewrite the text store once the journal passes this many ops
+    audit_log: false,        // also mirror every op, including rejected ones, to audit.xcdn
+  },
+
+  logging: {
+    path: null,        // file to write logs to; null disables file logging
+    level: "info",      // "error" | "warn" | "info" | "debug"
+    max_size_kb: 5120,  // rotate to .1/.2/... once the log exceeds this size
+    max_files: 3,        // how many rotated log files to keep
+    sync: false,          // fsync after every log line (off = faster, less durable)
+  },
+
+  // The curator model: decides what to remember, update, or forget.
+  curator: {
+    model_path: "models/qwen2.5-1.5b-instruct-q4_k_m.gguf",  // resolved against the process cwd, not --root
+    ctx: 4096,               // context window given to the curator model
+    threads: 4,               // CPU threads for curator inference
+    instruction_path: null,   // override the built-in curator instruction with a text file
+  },
+
+  // The embedding model: turns memory content and queries into vectors for retrieval.
+  embedding: {
+    model_path: "models/multilingual-e5-small-q8_0.gguf",  // resolved against the process cwd, not --root
+    dim: 384,                // must match the embedding model's output dimension
+    query_prefix: "",        // e.g. "query: " — some model families (e5) expect this
+    passage_prefix: "",      // e.g. "passage: "
+  },
+
+  // How many tokens each memory section may consume in the assembled prompt.
+  budgets: {
+    identity_tokens: 400,
+    context_tokens: 600,
+    project_tokens: 800,
+  },
+
+  injection: {
+    token_estimator: "curator",  // "curator" (uses the curator's tokenizer) | "heuristic" (bytes / 4)
+    template_path: null,          // override the default prompt template
+  },
+
+  // How memories are ranked and filtered for retrieval.
+  retrieval: {
+    k_context: 6,             // top-k context records injected per prompt
+    k_project: 8,             // top-k project records injected per prompt
+    min_similarity: 0.25,     // records below this cosine similarity are excluded outright
+    w_similarity: 0.70,       // scoring weight: semantic similarity
+    w_relevance: 0.20,        // scoring weight: effective relevance (decay-adjusted)
+    w_recency: 0.10,          // scoring weight: how recently the record was updated
+  },
+
+  // Background curation: when it runs and how much it's allowed to do.
+  curation: {
+    turn_batch: 4,                       // curate after this many unprocessed turns
+    idle_flush: r"PT30S",                // ...or after this much idle time, whichever comes first
+    max_ops_per_cycle: 8,                // hard cap on operations applied per curation cycle
+    dup_threshold: 0.92,                 // cosine similarity above which an INSERT becomes a dedup boost
+    transcript_tokens: 1200,             // how much conversation the curator sees per cycle
+    event_queue_max: 256,                // observed-turn queue cap before oldest turns are dropped
+    identity_confirm_window: r"P7D",     // window to re-propose an identity change before it's discarded
+    maintenance_interval: r"P1D",        // how often the deprecation review runs
+    review_batch: 16,                    // max deprecation candidates reviewed per maintenance pass
+  },
+
+  // On-demand question answering over the memory (asper_recall).
+  recall: {
+    k: 12,                 // candidate memories shown to the curator
+    answer_tokens: 160,    // generation cap for the answer
+    timeout: r"PT10S",      // caller-side timeout before ASPER_ERR_BUSY
+  },
+
+  // Relevance decay and cleanup of old memories.
+  decay: {
+    context_half_life: r"P30D",
+    project_half_life: r"P90D",
+    prune_threshold: 0.15,    // effective relevance below this makes a record a deprecation candidate
+    purge_after: r"P60D",     // deprecated records are physically deleted after this long
+  },
+
+  limits: {
+    identity_max_records: 64,   // hard cap on active identity records
+    content_max_chars: 500,      // max length of a single memory's content
+  },
+
+  projects: {
+    autocreate: true,   // selecting an unknown project slug creates it instead of failing
+  },
+
+}

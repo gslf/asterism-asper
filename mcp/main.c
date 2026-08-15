@@ -1,5 +1,5 @@
 /*
- * main.c — asper-mcp: MCP stdio server over libasper (spec §10).
+ * main.c — asper-mcp: MCP stdio server over libasper.
  *
  * JSON-RPC 2.0, newline-delimited compact JSON on stdin/stdout, protocol
  * revision 2025-06-18. Uses the PUBLIC libasper API exclusively (asper.h).
@@ -682,7 +682,7 @@ static int tool_memory_stats(asper_ctx *c, const jx_value *args,
   return TOOL_OK;
 }
 
-/* ═══════════════════════ tool table (§10) ═══════════════════════ */
+/* ═══════════════════════════ tool table ══════════════════════════ */
 
 typedef struct {
   const char *name;

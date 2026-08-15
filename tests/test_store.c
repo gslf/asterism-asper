@@ -61,7 +61,7 @@ TEST(insert_journal_reopen) {
   ASSERT_OK(asper_memory_insert(c, ASPER_SECTION_CONTEXT, NULL,
                                 "The user drinks tea", 0, id));
   ASSERT_TRUE(asper_uuid_valid(id));
-  /* the op is journaled before it is applied (§4.3) */
+  /* the op is journaled before it is applied */
   snprintf(path, sizeof path, "%s/journal.xcdn", root);
   journal = asper_test_read_file(path, NULL);
   ASSERT_TRUE(journal != NULL);

@@ -1,4 +1,4 @@
-/* test_config.c — config.c: §11 defaults, overlay of every key type,
+/* test_config.c — config.c: defaults, overlay of every key type,
  * wrong-type failures, unknown-key tolerance, enum strings. */
 
 #include "asper_test.h"

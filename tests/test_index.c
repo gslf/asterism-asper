@@ -174,8 +174,8 @@ TEST(scan_filters) {
   size_t n;
   ASSERT_TRUE(scan_fix_init(&f));
 
-  /* ANY + project NULL: project records are excluded entirely (§7.7:
-   * identity + context + the ACTIVE project only) */
+  /* ANY + project NULL: project records are excluded entirely (identity +
+   * context + the ACTIVE project only) */
   n = asper_index_scan(&f.ix, &f.cfg, &f.clk, f.q, ASPER_SECTION_ANY, NULL,
                        16, 0.0, 0, hits);
   ASSERT_EQ_INT(n, 3);
@@ -230,7 +230,7 @@ TEST(scan_filters) {
 
 TEST(scan_deterministic_order) {
   /* equal vectors + w_recency 0 => equal scores; the order must fall back
-   * to updated_at desc, then id asc (§5.3) */
+   * to updated_at desc, then id asc */
   asper_config cfg;
   fake_clock fclk;
   asper_clock clk;

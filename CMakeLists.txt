@@ -30,7 +30,7 @@ if(ASPER_SANITIZERS AND NOT MSVC)
 endif()
 
 # ── Dependencies ─────────────────────────────────────────────────────────────
-# xCDN-C: official parser/serializer for all persistent text (D3). With
+# xCDN-C: official parser/serializer for all persistent text. With
 # tests enabled its own test/example targets build too (its add_test entries
 # are registered either way, so they must be buildable to run).
 # Guarded so an embedding host (e.g. asngn) that already provides the xcdn
@@ -54,7 +54,7 @@ if(ASPER_WITH_LLAMA)
   set(LLAMA_BUILD_TOOLS    OFF CACHE BOOL "" FORCE)
   set(LLAMA_CURL           OFF CACHE BOOL "" FORCE)
   if(APPLE)
-    # CPU-only baseline (§13); enable Metal explicitly if desired.
+    # CPU-only baseline; enable Metal explicitly if desired.
     set(GGML_METAL OFF CACHE BOOL "" FORCE)
   endif()
   add_subdirectory(deps/llama.cpp EXCLUDE_FROM_ALL)

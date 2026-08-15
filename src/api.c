@@ -1,8 +1,8 @@
 /*
  * api.c — public API surface, the apply() mutation funnel, open/close wiring.
  *
- * Implements SPEC §2.3 (data flow), §8 (concurrency), §9 (public C API) and
- * the "Guardrail split", "asper_open sequence" and "build_prompt" sections of
+ * Implements data flow, concurrency, and the public C API, plus the
+ * "Guardrail split", "asper_open sequence" and "build_prompt" sections of
  * docs/IMPLEMENTATION_NOTES.md.
  */
 
@@ -58,7 +58,7 @@ const char *asper_last_error(const asper_ctx *c) {
 
 /* Curator-side pre-funnel rejection accounting: increments
  * stats.ops_rejected under the write lock. Non-static on purpose: curator.c
- * declares it `extern` and calls it for §7.5 pre-funnel curator drops (bad
+ * declares it `extern` and calls it for pre-funnel curator drops (bad
  * lines, caps, guardrails, quorum pendings) that never reach asper_apply_op,
  * so ops_applied/ops_rejected are incremented in exactly one module (this
  * one). */
@@ -175,7 +175,7 @@ void asper_set_logger(asper_ctx *c, asper_log_fn fn, void *userdata) {
   os_mutex_unlock(&c->log_mu);
 }
 
-/* ---- the apply() funnel (§8, notes "Guardrail split") ------------------- */
+/* ---- the apply() funnel (notes "Guardrail split") ------------------------ */
 
 static size_t identity_active_count(const asper_ctx *c) {
   size_t i, n = 0;
@@ -218,7 +218,7 @@ static void apply_index_embed(asper_ctx *c, asper_record *rec) {
 
 /* Universal validation, notes "Guardrail split". Write lock held. Fills
  * *out_target for id-addressed ops and `why` with a human-readable reason
- * on rejection. Source-independent except for the §7.5 locked guardrail on
+ * on rejection. Source-independent except for the locked guardrail on
  * KEEP, which applies only when from_curator (review can race a lock taken
  * between candidate collection and apply). */
 static asper_err apply_validate(asper_ctx *c, const asper_op *op,
@@ -325,7 +325,7 @@ static asper_err apply_validate(asper_ctx *c, const asper_op *op,
       snprintf(why, why_sz, "unknown id %s", op->id);
       return ASPER_ERR_NOT_FOUND;
     }
-    /* §7.5: the locked guardrail covers curator KEEP too. Host KEEP on
+    /* The locked guardrail covers curator KEEP too. Host KEEP on
      * locked records stays allowed (rescue path), and journal replay goes
      * through asper_store_apply, not this funnel. */
     if (from_curator && t->locked) {
@@ -387,7 +387,7 @@ asper_err asper_apply_op(asper_ctx *c, asper_op *op, bool from_curator) {
     return asper_seterr(c, e, "%s rejected: %s", kname, why);
   }
 
-  /* §4.3: appended to the journal first, then applied to memory. */
+  /* Appended to the journal first, then applied to memory. */
   e = asper_journal_append(c, op, !from_curator);
   if (e != ASPER_OK) {
     os_rwlock_wrunlock(&c->lock);
@@ -735,7 +735,7 @@ asper_err asper_observe_turn(asper_ctx *c, asper_role role,
   c->turns[c->turns_n].at = now;
   c->turns_n++;
   c->last_turn_at = now;
-  /* Wake the worker on EVERY enqueued turn so the §7.2 idle-flush deadline
+  /* Wake the worker on EVERY enqueued turn so the idle-flush deadline
    * arms even for a partial batch; turn_batch only decides when a cycle is
    * due, not when the worker wakes (notes "Post-review amendments"). */
   if (!c->no_threads && c->worker_running)
@@ -806,7 +806,7 @@ out:
   return e;
 }
 
-/* ---- recall (§7.7) ------------------------------------------------------ */
+/* ---- recall -------------------------------------------------------------- */
 
 asper_err asper_recall(asper_ctx *c, const char *question, char **out_answer,
                        asper_record ***out_cited, size_t *out_cited_n) {
@@ -1139,7 +1139,7 @@ asper_err asper_memory_search(asper_ctx *c, asper_section s,
   }
 
   /* NULL project on PROJECT/ANY scans means "the active project" (mirrors
-   * recall §7.7; notes "Post-review amendments"): snapshot it under the
+   * recall; notes "Post-review amendments"): snapshot it under the
    * read lock via asper_project_active. With no active project the NULL
    * passes through and project records are simply absent from results. */
   if (!project &&

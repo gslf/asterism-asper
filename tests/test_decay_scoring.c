@@ -123,7 +123,7 @@ TEST(hit_tie_break_ordering) {
 }
 
 TEST(prune_threshold_boundary) {
-  /* the review candidacy math the maintenance cycle relies on (§3.4) */
+  /* the review candidacy math the maintenance cycle relies on */
   asper_config cfg;
   asper_record r;
   double eff;

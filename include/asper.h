@@ -2,7 +2,7 @@
  * asper.h — Asterism Persistence ("Asper")
  *
  * An identitarian memory system for small LLMs.
- * Public C API of libasper. See docs/SPEC.txt §9.
+ * Public C API of libasper.
  *
  * Contract notes:
  *   - All strings are UTF-8.
@@ -119,7 +119,7 @@ const char   *asper_record_tag(const asper_record *r, size_t i);
 /* Retrieval score when the record came from asper_memory_search; else 0. */
 double        asper_record_score(const asper_record *r);
 
-/* ---- recall: pull channel (spec §7.7) ---------------------------------- */
+/* ---- recall: pull channel ------------------------------------------------ */
 
 /* Blocking, up to recall.timeout. out_cited/out_cited_n may be NULL if the
  * citations are unwanted. NOMEM from the curator maps to ASPER_ERR_NOT_FOUND

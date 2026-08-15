@@ -1,5 +1,5 @@
 /*
- * embed_llama.c — llama.cpp embedding backend (spec §5.1, §12).
+ * embed_llama.c — llama.cpp embedding backend.
  *
  * Two llama contexts share one loaded model, each guarded by its own
  * mutex: the query context serves the hot path from any thread, the

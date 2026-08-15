@@ -1,9 +1,9 @@
 /*
- * decay.c — effective relevance and retrieval scoring (spec §3.4, §5.3).
+ * decay.c — effective relevance and retrieval scoring.
  *
  * Identity never decays: asper_half_life_s returns 0 for it, which every
- * helper here treats as "no decay" (factor 1.0). The spec defines scoring
- * only for context/project (identity bypasses retrieval), but ANY-scans
+ * helper here treats as "no decay" (factor 1.0). Scoring applies only
+ * to context/project (identity bypasses retrieval), but ANY-scans
  * (recall, search) still score identity records: with half-life 0 the
  * formula degenerates to w_sim*cos + w_rel*relevance + w_rec*1.0.
  */
@@ -21,7 +21,7 @@ int64_t asper_half_life_s(const asper_config *cfg, asper_section s)
     case ASPER_SECTION_PROJECT:
         return cfg->project_half_life_s;
     default:
-        return 0; /* identity: no decay (§3.2) */
+        return 0; /* identity: no decay */
     }
 }
 

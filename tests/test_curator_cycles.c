@@ -1,5 +1,5 @@
 /* test_curator_cycles.c — curator.c/grammar.c: scripted end-to-end cycles,
- * every §7.5 guardrail, identity quorum, dedup, protocol parsing, GBNF. */
+ * every guardrail, identity quorum, dedup, protocol parsing, GBNF. */
 
 #include "asper_test.h"
 

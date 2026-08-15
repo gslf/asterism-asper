@@ -54,7 +54,7 @@ TEST(file_sink_line_format) {
   asper_close(c); /* close flushes the sink */
   text = asper_test_read_file(log_path, NULL);
   ASSERT_TRUE(text != NULL);
-  /* exact §15 line shape: ts, level %-5s, subsystem %-8s, message */
+  /* exact line shape: ts, level %-5s, subsystem %-8s, message */
   ASSERT_TRUE(strstr(text,
                      "2026-07-29T10:12:00Z INFO  store    unit test line 7\n")
               != NULL);

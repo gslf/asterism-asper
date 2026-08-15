@@ -1,11 +1,11 @@
 /*
- * retrieve.c — query-side selection (spec §5.1, §5.3).
+ * retrieve.c — query-side selection.
  *
  * asper_retrieve embeds the query on the calling thread (the embedder
  * backend owns a dedicated llama context for is_query != 0, so this never
  * contends with the worker), scans the flat index under the read lock and
  * returns deep clones of the hits with .score set. The collect_* helpers
- * return deep clones for injection (§6.1 identity order) and for
+ * return deep clones for injection (in identity order) and for
  * asper_memory_list. All returned arrays are released with
  * asper_records_free.
  */
@@ -160,7 +160,7 @@ static bool list_match(const asper_record *r, asper_section s,
   if (s != ASPER_SECTION_ANY && r->section != s)
     return false;
   /* The project filter constrains PROJECT records only; identity and
-   * context records carry no project and always pass it (§3.3, asper.h). */
+   * context records carry no project and always pass it (see asper.h). */
   if (project && r->section == ASPER_SECTION_PROJECT) {
     if (!r->project || strcmp(r->project, project) != 0)
       return false;
