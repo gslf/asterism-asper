@@ -530,13 +530,19 @@ static asper_err compact_recover(asper_ctx *c) {
   if (e != ASPER_OK) goto out;
   for (char *line = text; line && *line;) {
     char *nl = strchr(line, '\n');
-    char kind;
-    const char *rel;
+    /* Parsed out of the condition and pre-initialized: assigning inside a
+     * short-circuit chain is correct but defeats MSVC's definite-assignment
+     * analysis (C4701/C4703, fatal under /WX). A malformed line leaves kind
+     * at '\0', which the check below rejects exactly as before. */
+    char kind = '\0';
+    const char *rel = NULL;
     char *target = NULL, *backup = NULL;
     if (nl) *nl = '\0';
-    if (strlen(line) < 3 || line[1] != ' ' ||
-        ((kind = line[0]) != 'E' && kind != 'M') ||
-        !compact_rel_valid(rel = line + 2)) {
+    if (strlen(line) >= 3 && line[1] == ' ') {
+      kind = line[0];
+      rel = line + 2;
+    }
+    if ((kind != 'E' && kind != 'M') || !compact_rel_valid(rel)) {
       e = asper_seterr(c, ASPER_ERR_PARSE,
                        "compact recovery: invalid marker entry");
       goto out;

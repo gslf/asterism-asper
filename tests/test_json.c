@@ -319,7 +319,10 @@ TEST(builders_and_clone) {
 }
 
 TEST(double_rejects_non_finite) {
-  jx_value *v = jx_double(1e308 * 10.0); /* inf */
+  /* Built at runtime: folding `1e308 * 10.0` at compile time makes MSVC
+   * raise C4056 (overflow in floating-point constant arithmetic). */
+  double huge = 1e308;
+  jx_value *v = jx_double(huge * 10.0); /* inf */
   ASSERT_TRUE(v == NULL);
   v = jx_string("bad \xff utf8");
   ASSERT_TRUE(v == NULL);

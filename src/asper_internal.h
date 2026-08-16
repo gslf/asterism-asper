@@ -415,7 +415,7 @@ double  asper_eff_relevance(const asper_config *cfg, const asper_record *r,
                             asper_time now);
 /* score(m, q). */
 double  asper_score_record(const asper_config *cfg, const asper_record *r,
-                           double cos, asper_time now);
+                           double cosine, asper_time now);
 /* Deterministic tie-break: score desc, updated_at desc, id asc.
  * Returns <0 if a ranks before b. */
 int     asper_hit_cmp(const asper_hit *a, const asper_hit *b);

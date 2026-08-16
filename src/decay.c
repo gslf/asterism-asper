@@ -41,13 +41,15 @@ double asper_eff_relevance(const asper_config *cfg, const asper_record *r,
     return r->relevance * asper_decay_factor(now - r->last_access, hl);
 }
 
+/* Named `cosine`, not `cos`: a parameter named `cos` hides <math.h>'s cos()
+ * and MSVC raises C4459 for it (fatal under /WX). */
 double asper_score_record(const asper_config *cfg, const asper_record *r,
-                          double cos, asper_time now)
+                          double cosine, asper_time now)
 {
     int64_t hl = asper_half_life_s(cfg, r->section);
     double eff = r->relevance * asper_decay_factor(now - r->last_access, hl);
     double rec = asper_decay_factor(now - r->updated_at, hl);
-    return cfg->w_similarity * cos + cfg->w_relevance * eff +
+    return cfg->w_similarity * cosine + cfg->w_relevance * eff +
            cfg->w_recency * rec;
 }
 

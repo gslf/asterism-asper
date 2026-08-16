@@ -16,7 +16,10 @@ endif()
 
 # Strict flags apply to Asper translation units only (deps use their own).
 if(MSVC)
-  set(ASPER_C_FLAGS /W4 /WX)
+  # /utf-8: the sources are UTF-8 (section banners in comments). Without it
+  # MSVC decodes them in the runner's ANSI codepage, which raises C4819 on
+  # any non-Latin-1 locale — a hard error under /WX.
+  set(ASPER_C_FLAGS /W4 /WX /utf-8)
 else()
   set(ASPER_C_FLAGS -Wall -Wextra -Wpedantic -Werror)
 endif()
@@ -27,8 +30,13 @@ endif()
 # its visibility decisions at the first system header any given .c file
 # includes — and that first include isn't consistently os.h/asper_internal.h
 # across the codebase. Mirrors what os_posix.c defines for itself.
+#
+# On Windows the same channel carries _CRT_SECURE_NO_WARNINGS: the UCRT marks
+# strerror/fopen/strcpy/sscanf deprecated (C4996), which /WX turns into build
+# errors. os_win32.c already defines it for itself, but a per-file #define
+# cannot reach the other translation units — cache.c and the tests need it too.
 if(WIN32 OR MSVC)
-  set(ASPER_C_DEFS)
+  set(ASPER_C_DEFS _CRT_SECURE_NO_WARNINGS)
 else()
   set(ASPER_C_DEFS _POSIX_C_SOURCE=200809L _FILE_OFFSET_BITS=64)
   if(APPLE)
@@ -124,7 +132,14 @@ endif()
 add_library(asper_static STATIC $<TARGET_OBJECTS:asper_obj>)
 set_target_properties(asper_static PROPERTIES OUTPUT_NAME asper)
 add_library(asper_shared SHARED $<TARGET_OBJECTS:asper_obj>)
-set_target_properties(asper_shared PROPERTIES OUTPUT_NAME asper)
+# WINDOWS_EXPORT_ALL_SYMBOLS: nothing in the sources carries __declspec(export),
+# so without this MSVC links asper.dll with zero exports and emits no import
+# library — a shipped artifact (SPECS.md) that no consumer can link against.
+# The public API in include/asper.h is functions only, which is exactly what
+# this property handles cleanly; it is a no-op on ELF/Mach-O.
+set_target_properties(asper_shared PROPERTIES
+  OUTPUT_NAME asper
+  WINDOWS_EXPORT_ALL_SYMBOLS ON)
 
 foreach(tgt asper_static asper_shared)
   target_include_directories(${tgt} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)

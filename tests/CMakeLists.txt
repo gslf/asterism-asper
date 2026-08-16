@@ -3,7 +3,7 @@
 # The strict-flag list mirrors the top-level ASPER_C_FLAGS convention; it is
 # recreated here because the parent-scope variable may not propagate.
 if(MSVC)
-  set(ASPER_C_FLAGS /W4 /WX)
+  set(ASPER_C_FLAGS /W4 /WX /utf-8)
 else()
   set(ASPER_C_FLAGS -Wall -Wextra -Wpedantic -Werror)
 endif()
@@ -11,8 +11,10 @@ endif()
 # Mirrors the top-level ASPER_C_DEFS: feature-test macros for POSIX APIs
 # (pthread_rwlock_t, etc.) pulled in via asper_internal.h/os.h. Must be a
 # compiler define, not a header #define — see the top-level CMakeLists.txt.
+# On Windows it carries _CRT_SECURE_NO_WARNINGS instead: asper_test.h, fakes.c
+# and several test cases use strcpy/fopen/sscanf, all C4996 under /W4 /WX.
 if(WIN32 OR MSVC)
-  set(ASPER_C_DEFS)
+  set(ASPER_C_DEFS _CRT_SECURE_NO_WARNINGS)
 else()
   set(ASPER_C_DEFS _POSIX_C_SOURCE=200809L _FILE_OFFSET_BITS=64)
   if(APPLE)

@@ -190,18 +190,20 @@ size_t asper_index_scan(const asper_index *ix, const asper_config *cfg,
     for (i = 0; i < ix->n; i++) {
         asper_record *r = ix->recs[i];
         asper_hit h;
-        double cos;
+        /* Not `cos`: that would hide <math.h>'s cos() (MSVC C4459, fatal
+         * under /WX). The asper_hit member keeps its name. */
+        double cosine;
         size_t pos;
 
         if (!asper_scan_match(r, section, project))
             continue;
-        cos = asper_cosine(qvec, ix->vecs + i * (size_t)ix->dim, ix->dim);
-        if (cos < min_sim)
+        cosine = asper_cosine(qvec, ix->vecs + i * (size_t)ix->dim, ix->dim);
+        if (cosine < min_sim)
             continue;
 
         h.rec = r;
-        h.cos = cos;
-        h.score = asper_score_record(cfg, r, cos, now);
+        h.cos = cosine;
+        h.score = asper_score_record(cfg, r, cosine, now);
 
         /* Ordered insertion into the top-k array; k is small.
          * Selection and order follow the active ranking: composite score
