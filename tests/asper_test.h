@@ -126,7 +126,16 @@ static int asper_test_tmpdir(char out[256]) {
   char base[MAX_PATH];
   DWORD n = GetTempPathA(MAX_PATH, base);
   unsigned tries;
+  char *p;
   if (n == 0 || n >= MAX_PATH) return 0;
+  /* GetTempPathA returns backslashes, but tests interpolate this root into
+   * generated xCDN config text, where '\' opens an escape sequence: an
+   * unknown one (\U, \A, \R ...) aborts the parse, and a path component
+   * starting with 't' or 'b' would be corrupted silently into a tab or a
+   * backspace. libasper uses '/' as its separator on every platform and the
+   * Win32 calls used here accept it, so normalize once at the source. */
+  for (p = base; *p; p++)
+    if (*p == '\\') *p = '/';
   for (tries = 0; tries < 100; tries++) {
     snprintf(out, 256, "%sasper_test_%08x_%u", base,
              (unsigned)GetTickCount() ^ ((unsigned)rand() << 12), tries);
