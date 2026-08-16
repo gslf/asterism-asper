@@ -473,6 +473,125 @@ static asper_err store_load_projects(asper_ctx *c) {
 
 /* ═══════════════════════ open / close ═══════════════════════ */
 
+#define COMPACT_MARKER "compact.pending"
+#define COMPACT_BACKUP_SUFFIX ".compact.bak"
+
+static asper_err store_write_atomic(asper_ctx *c, const char *path,
+                                    const char *data, size_t len);
+
+static char *compact_backup_path(const char *path) {
+  size_t n = strlen(path) + sizeof COMPACT_BACKUP_SUFFIX;
+  char *out = malloc(n);
+  if (out) snprintf(out, n, "%s%s", path, COMPACT_BACKUP_SUFFIX);
+  return out;
+}
+
+static bool compact_rel_valid(const char *rel) {
+  size_t n;
+  if (!rel) return false;
+  if (strcmp(rel, "identity.xcdn") == 0 ||
+      strcmp(rel, "context.xcdn") == 0 || strcmp(rel, "journal.xcdn") == 0)
+    return true;
+  if (strncmp(rel, "projects/", 9) != 0) return false;
+  n = strlen(rel + 9);
+  if (n <= 5 || strcmp(rel + strlen(rel) - 5, ".xcdn") != 0) return false;
+  {
+    char *slug = asper_strndup(rel + 9, n - 5);
+    bool valid = slug && asper_slug_valid(slug);
+    free(slug);
+    return valid;
+  }
+}
+
+static asper_err compact_copy_atomic(asper_ctx *c, const char *src,
+                                     const char *dst) {
+  char *data = NULL;
+  size_t len = 0;
+  asper_err e = os_read_file(src, &data, &len);
+  if (e == ASPER_OK) e = store_write_atomic(c, dst, data, len);
+  free(data);
+  return e;
+}
+
+/* A marker means the previous compaction never committed. Backups are copied
+ * (not renamed) during recovery, making recovery itself restartable. */
+static asper_err compact_recover(asper_ctx *c) {
+  char *marker = os_path_join(c->store.root, COMPACT_MARKER);
+  char *text = NULL;
+  char **backups = NULL;
+  size_t backups_n = 0, backups_cap = 0;
+  asper_err e = ASPER_OK;
+  if (!marker) return ASPER_ERR_NOMEM;
+  if (!os_file_exists(marker)) {
+    free(marker);
+    return ASPER_OK;
+  }
+  e = os_read_file(marker, &text, NULL);
+  if (e != ASPER_OK) goto out;
+  for (char *line = text; line && *line;) {
+    char *nl = strchr(line, '\n');
+    char kind;
+    const char *rel;
+    char *target = NULL, *backup = NULL;
+    if (nl) *nl = '\0';
+    if (strlen(line) < 3 || line[1] != ' ' ||
+        ((kind = line[0]) != 'E' && kind != 'M') ||
+        !compact_rel_valid(rel = line + 2)) {
+      e = asper_seterr(c, ASPER_ERR_PARSE,
+                       "compact recovery: invalid marker entry");
+      goto out;
+    }
+    target = os_path_join(c->store.root, rel);
+    backup = target ? compact_backup_path(target) : NULL;
+    if (!target || !backup) {
+      free(target); free(backup);
+      e = ASPER_ERR_NOMEM;
+      goto out;
+    }
+    if (kind == 'E') {
+      if (!os_file_exists(backup))
+        e = asper_seterr(c, ASPER_ERR_IO,
+                         "compact recovery: missing backup for %s", rel);
+      else
+        e = compact_copy_atomic(c, backup, target);
+    } else {
+      e = os_remove_file(target);
+      if (e == ASPER_ERR_NOT_FOUND) e = ASPER_OK;
+    }
+    free(target);
+    if (e != ASPER_OK) {
+      free(backup);
+      goto out;
+    }
+    if (backups_n == backups_cap) {
+      size_t cap = backups_cap ? backups_cap * 2 : 8;
+      char **grown = realloc(backups, cap * sizeof *grown);
+      if (!grown) {
+        free(backup);
+        e = ASPER_ERR_NOMEM;
+        goto out;
+      }
+      backups = grown;
+      backups_cap = cap;
+    }
+    backups[backups_n++] = backup;
+    line = nl ? nl + 1 : NULL;
+  }
+  e = os_remove_file(marker);
+  if (e == ASPER_OK) {
+    for (size_t i = 0; i < backups_n; i++)
+      (void)os_remove_file(backups[i]);
+    asper_log(c, ASPER_LOG_WARN, "store",
+              "recovered an interrupted compaction");
+  }
+out:
+  for (size_t i = 0; i < backups_n; i++) free(backups[i]);
+  free(backups);
+  free(text);
+  free(marker);
+  return e;
+}
+
 void asper_store_close(asper_ctx *c) {
   asper_store *st;
   if (!c) return;
@@ -536,6 +655,8 @@ asper_err asper_store_open(asper_ctx *c) {
                      st->root);
     goto fail;
   }
+
+  if ((e = compact_recover(c)) != ASPER_OK) goto fail;
 
   if ((e = asper_manifest_load(c, &st->manifest)) != ASPER_OK) goto fail;
 
@@ -702,6 +823,60 @@ static asper_err store_write_atomic(asper_ctx *c, const char *path,
   return e;
 }
 
+static asper_err compact_tx_begin(asper_ctx *c, char *const *rels, size_t n) {
+  asper_buf marker;
+  char *marker_path = NULL;
+  asper_err e = ASPER_OK;
+  asper_buf_init(&marker);
+  for (size_t i = 0; e == ASPER_OK && i < n; i++) {
+    char *target = os_path_join(c->store.root, rels[i]);
+    char *backup = target ? compact_backup_path(target) : NULL;
+    bool existed = target && os_file_exists(target);
+    if (!target || !backup) {
+      e = ASPER_ERR_NOMEM;
+    } else if (existed) {
+      e = compact_copy_atomic(c, target, backup);
+    }
+    if (e == ASPER_OK)
+      e = asper_buf_printf(&marker, "%c %s\n", existed ? 'E' : 'M', rels[i]);
+    free(target);
+    free(backup);
+  }
+  marker_path = os_path_join(c->store.root, COMPACT_MARKER);
+  if (e == ASPER_OK && !marker_path) e = ASPER_ERR_NOMEM;
+  if (e == ASPER_OK)
+    e = store_write_atomic(c, marker_path, marker.data, marker.len);
+  if (e != ASPER_OK) {
+    for (size_t i = 0; i < n; i++) {
+      char *target = os_path_join(c->store.root, rels[i]);
+      char *backup = target ? compact_backup_path(target) : NULL;
+      if (backup) (void)os_remove_file(backup);
+      free(target);
+      free(backup);
+    }
+  }
+  free(marker_path);
+  asper_buf_free(&marker);
+  return e;
+}
+
+static asper_err compact_tx_commit(asper_ctx *c, char *const *rels, size_t n) {
+  char *marker = os_path_join(c->store.root, COMPACT_MARKER);
+  asper_err e;
+  if (!marker) return ASPER_ERR_NOMEM;
+  e = os_remove_file(marker);
+  free(marker);
+  if (e != ASPER_OK) return e;
+  for (size_t i = 0; i < n; i++) {
+    char *target = os_path_join(c->store.root, rels[i]);
+    char *backup = target ? compact_backup_path(target) : NULL;
+    if (backup) (void)os_remove_file(backup);
+    free(target);
+    free(backup);
+  }
+  return ASPER_OK;
+}
+
 static bool purge_due(const asper_ctx *c, const asper_record *r,
                       asper_time now) {
   return r->deprecated && now - r->deprecated_at >= c->cfg.purge_after_s;
@@ -715,6 +890,10 @@ asper_err asper_store_compact(asper_ctx *c) {
   asper_buf *pbufs = NULL;
   size_t np = 0;
   size_t written = 0, purged = 0;
+  char **tx_rels = NULL;
+  size_t tx_n = 0;
+  size_t journal_ops_before;
+  bool tx_active = false;
 
   asper_buf_init(&ident);
   asper_buf_init(&ctxb);
@@ -722,6 +901,7 @@ asper_err asper_store_compact(asper_ctx *c) {
   os_rwlock_wrlock(&c->lock);
   os_mutex_lock(&c->journal_mu);
   now = asper_clock_now(&c->clock);
+  journal_ops_before = st->journal_ops;
 
   /* Register any project slug reachable only through records so every
    * project gets its file (slugs persist across compaction). */
@@ -733,6 +913,36 @@ asper_err asper_store_compact(asper_ctx *c) {
   }
 
   np = st->projects_n;
+
+  /* Back up every file participating in the multi-file commit. The marker
+   * is written last, so an interrupted setup is ignored; once present it is
+   * sufficient for deterministic rollback on the next open. */
+  if (e == ASPER_OK) {
+    tx_n = np + 3;
+    tx_rels = calloc(tx_n, sizeof *tx_rels);
+    if (!tx_rels) {
+      e = ASPER_ERR_NOMEM;
+    } else {
+      tx_rels[0] = asper_strdup("identity.xcdn");
+      tx_rels[1] = asper_strdup("context.xcdn");
+      tx_rels[2] = asper_strdup("journal.xcdn");
+      for (size_t i = 0; i < np; i++) {
+        asper_buf rel;
+        asper_buf_init(&rel);
+        if (asper_buf_printf(&rel, "projects/%s.xcdn", st->projects[i]) ==
+            ASPER_OK)
+          tx_rels[i + 3] = asper_buf_detach(&rel);
+        asper_buf_free(&rel);
+      }
+      for (size_t i = 0; i < tx_n; i++)
+        if (!tx_rels[i]) e = ASPER_ERR_NOMEM;
+    }
+  }
+  if (e == ASPER_OK) {
+    e = compact_tx_begin(c, tx_rels, tx_n);
+    tx_active = (e == ASPER_OK);
+  }
+
   if (e == ASPER_OK && np > 0) {
     pbufs = (asper_buf *)calloc(np, sizeof(asper_buf));
     if (!pbufs)
@@ -796,13 +1006,8 @@ asper_err asper_store_compact(asper_ctx *c) {
     free(ppath);
   }
 
-  /* Reset the journal: close, atomically replace with empty, reopen.
-   * Known limitation (IMPLEMENTATION_NOTES.md, Post-review amendments): a
-   * crash between the section-file replace above and this journal reset
-   * leaves the already-compacted boosts in the journal, so the next open
-   * replays ACCESS/KEEP boosts a second time. Drift is bounded (+0.05
-   * relevance / +1 access_count per op) and no structural corruption is
-   * possible. */
+  /* Reset the journal: the active transaction rolls all section files and
+   * this journal back together if the process stops before commit. */
   if (e == ASPER_OK) {
     if (st->journal_fp) {
       fclose(st->journal_fp);
@@ -820,6 +1025,24 @@ asper_err asper_store_compact(asper_ctx *c) {
       /* keep the store appendable even when the reset failed */
       st->journal_fp = os_fopen(st->journal_path, "ab");
     }
+  }
+
+  if (e == ASPER_OK && tx_active) {
+    e = compact_tx_commit(c, tx_rels, tx_n);
+    if (e == ASPER_OK) tx_active = false;
+  }
+  if (e != ASPER_OK && tx_active) {
+    asper_err recovery;
+    if (st->journal_fp) {
+      fclose(st->journal_fp);
+      st->journal_fp = NULL;
+    }
+    recovery = compact_recover(c);
+    st->journal_fp = os_fopen(st->journal_path, "ab");
+    st->journal_ops = journal_ops_before;
+    if (recovery != ASPER_OK)
+      asper_log(c, ASPER_LOG_ERROR, "store",
+                "compaction rollback failed: %s", asper_err_name(recovery));
   }
 
   /* Purge: drop purge-due records from table and index. */
@@ -853,6 +1076,10 @@ asper_err asper_store_compact(asper_ctx *c) {
   if (pbufs) {
     for (size_t i = 0; i < np; i++) asper_buf_free(&pbufs[i]);
     free(pbufs);
+  }
+  if (tx_rels) {
+    for (size_t i = 0; i < tx_n; i++) free(tx_rels[i]);
+    free(tx_rels);
   }
   os_mutex_unlock(&c->journal_mu);
   os_rwlock_wrunlock(&c->lock);

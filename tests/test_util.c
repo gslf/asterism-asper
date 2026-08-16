@@ -178,6 +178,18 @@ TEST(token_heuristic) {
                 2); /* 4 two-byte code points = 8 bytes */
 }
 
+TEST(utf8_validation_and_character_count) {
+  size_t n = 99;
+  ASSERT_TRUE(asper_utf8_count("hello", &n));
+  ASSERT_EQ_INT(n, 5);
+  ASSERT_TRUE(asper_utf8_count("\xc3\xa8\xe2\x82\xac\xf0\x9f\x98\x80", &n));
+  ASSERT_EQ_INT(n, 3);
+  ASSERT_TRUE(!asper_utf8_count("\xc0\x80", &n));       /* overlong NUL */
+  ASSERT_TRUE(!asper_utf8_count("\xed\xa0\x80", &n)); /* surrogate */
+  ASSERT_TRUE(!asper_utf8_count("\xf4\x90\x80\x80", &n));
+  ASSERT_TRUE(!asper_utf8_count("\xe2\x82", &n));      /* truncated */
+}
+
 TEST(section_source_names) {
   asper_section s;
   asper_source src;
@@ -208,6 +220,7 @@ TEST_LIST = {
     TEST_ENTRY(base64_decode_vectors_and_rejects),
     TEST_ENTRY(slug_rules),
     TEST_ENTRY(token_heuristic),
+    TEST_ENTRY(utf8_validation_and_character_count),
     TEST_ENTRY(section_source_names),
 };
 

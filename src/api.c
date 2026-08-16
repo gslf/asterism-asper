@@ -186,10 +186,9 @@ static size_t identity_active_count(const asper_ctx *c) {
   return n;
 }
 
-/* Passage-embed rec and (re)insert its index row. Write lock held by the
- * caller. Embedding a <= content_max_chars text inline under the write lock
- * is an accepted v1 simplification (a few ms; see the implementation notes).
- * Failures degrade to WARN: the record simply stays unindexed. */
+/* Passage-embed rec and (re)insert its index row. Used only by the uncommon
+ * KEEP restore path; INSERT/UPDATE prepare their vector before taking the
+ * global write lock. Failures degrade to WARN and remove stale rows. */
 static void apply_index_embed(asper_ctx *c, asper_record *rec) {
   float *vec;
   asper_err e;
@@ -205,6 +204,10 @@ static void apply_index_embed(asper_ctx *c, asper_record *rec) {
   if (e != ASPER_OK) {
     asper_log(c, ASPER_LOG_WARN, "embed", "embedding failed for %s: %s",
               rec->id, asper_err_name(e));
+    if (rec->emb_row >= 0) {
+      asper_index_remove(&c->index, rec);
+      c->cache_dirty = true;
+    }
   } else {
     e = asper_index_put(&c->index, rec, vec);
     if (e != ASPER_OK)
@@ -226,6 +229,7 @@ static asper_err apply_validate(asper_ctx *c, const asper_op *op,
                                 asper_record **out_target, char *why,
                                 size_t why_sz) {
   asper_record *t;
+  size_t content_chars;
   *out_target = NULL;
 
   switch (op->kind) {
@@ -249,7 +253,11 @@ static asper_err apply_validate(asper_ctx *c, const asper_op *op,
       snprintf(why, why_sz, "empty content");
       return ASPER_ERR_INVALID;
     }
-    if (strlen(r->content) > (size_t)c->cfg.content_max_chars) {
+    if (!asper_utf8_count(r->content, &content_chars)) {
+      snprintf(why, why_sz, "content is not valid UTF-8");
+      return ASPER_ERR_INVALID;
+    }
+    if (content_chars > (size_t)c->cfg.content_max_chars) {
       snprintf(why, why_sz, "content exceeds %d chars",
                c->cfg.content_max_chars);
       return ASPER_ERR_INVALID;
@@ -285,7 +293,11 @@ static asper_err apply_validate(asper_ctx *c, const asper_op *op,
       snprintf(why, why_sz, "empty content");
       return ASPER_ERR_INVALID;
     }
-    if (strlen(op->content) > (size_t)c->cfg.content_max_chars) {
+    if (!asper_utf8_count(op->content, &content_chars)) {
+      snprintf(why, why_sz, "content is not valid UTF-8");
+      return ASPER_ERR_INVALID;
+    }
+    if (content_chars > (size_t)c->cfg.content_max_chars) {
       snprintf(why, why_sz, "content exceeds %d chars",
                c->cfg.content_max_chars);
       return ASPER_ERR_INVALID;
@@ -370,6 +382,9 @@ asper_err asper_apply_op(asper_ctx *c, asper_op *op, bool from_curator) {
   asper_record *target = NULL;
   const char *kname;
   asper_err e;
+  asper_err embed_e = ASPER_OK;
+  float *prepared_vec = NULL;
+  const char *embed_text = NULL;
   size_t access_n = 0;
 
   if (!c || !op) return ASPER_ERR_INVALID;
@@ -378,11 +393,32 @@ asper_err asper_apply_op(asper_ctx *c, asper_op *op, bool from_curator) {
   why[0] = '\0';
   idbuf[0] = '\0';
 
+  /* Embedding is the slowest mutation step. Prepare it without c->lock so
+   * retrieval and unrelated writes are not stalled by model inference. The
+   * authoritative validation is still repeated below while holding the lock. */
+  if (op->kind == ASPER_OP_INSERT && op->record)
+    embed_text = op->record->content;
+  else if (op->kind == ASPER_OP_UPDATE)
+    embed_text = op->content;
+  if (embed_text && c->has_embedder && c->index.dim > 0) {
+    size_t chars;
+    if (!asper_str_blank(embed_text) && asper_utf8_count(embed_text, &chars) &&
+        chars <= (size_t)c->cfg.content_max_chars) {
+      prepared_vec = malloc((size_t)c->index.dim * sizeof *prepared_vec);
+      if (!prepared_vec)
+        embed_e = ASPER_ERR_NOMEM;
+      else
+        embed_e = c->embedder.embed(c->embedder.ud, embed_text, 0,
+                                    prepared_vec);
+    }
+  }
+
   os_rwlock_wrlock(&c->lock);
   e = apply_validate(c, op, from_curator, &target, why, sizeof why);
   if (e != ASPER_OK) {
     c->stats.ops_rejected++;
     os_rwlock_wrunlock(&c->lock);
+    free(prepared_vec);
     asper_log(c, ASPER_LOG_INFO, "store", "%s rejected: %s", kname, why);
     return asper_seterr(c, e, "%s rejected: %s", kname, why);
   }
@@ -391,6 +427,7 @@ asper_err asper_apply_op(asper_ctx *c, asper_op *op, bool from_curator) {
   e = asper_journal_append(c, op, !from_curator);
   if (e != ASPER_OK) {
     os_rwlock_wrunlock(&c->lock);
+    free(prepared_vec);
     return asper_seterr(c, e, "journal append failed for %s", kname);
   }
 
@@ -402,6 +439,7 @@ asper_err asper_apply_op(asper_ctx *c, asper_op *op, bool from_curator) {
       /* Journal-present but skipped in memory: same tolerance as replay. */
       c->stats.ops_rejected++;
       os_rwlock_wrunlock(&c->lock);
+      free(prepared_vec);
       asper_log(c, ASPER_LOG_WARN, "store", "%s journaled but not applied: %s",
                 kname, asper_err_name(e));
       return asper_seterr(c, e, "%s failed to apply", kname);
@@ -415,7 +453,18 @@ asper_err asper_apply_op(asper_ctx *c, asper_op *op, bool from_curator) {
   switch (op->kind) {
   case ASPER_OP_INSERT:
   case ASPER_OP_UPDATE:
-    apply_index_embed(c, target);
+    if (prepared_vec && embed_e == ASPER_OK) {
+      e = asper_index_put(&c->index, target, prepared_vec);
+      if (e != ASPER_OK)
+        asper_log(c, ASPER_LOG_WARN, "index", "index put failed for %s: %s",
+                  target->id, asper_err_name(e));
+      else
+        c->cache_dirty = true;
+    } else if (target && target->emb_row >= 0) {
+      /* An UPDATE must never retain the vector for its old content. */
+      asper_index_remove(&c->index, target);
+      c->cache_dirty = true;
+    }
     break;
   case ASPER_OP_KEEP:
     /* Restore path: a rescued record lost its row at deprecation. */
@@ -435,6 +484,10 @@ asper_err asper_apply_op(asper_ctx *c, asper_op *op, bool from_curator) {
   if (target) memcpy(idbuf, target->id, sizeof idbuf);
   access_n = op->ids_n;
   os_rwlock_wrunlock(&c->lock);
+  if (embed_text && embed_e != ASPER_OK)
+    asper_log(c, ASPER_LOG_WARN, "embed", "embedding failed for %s: %s",
+              idbuf, asper_err_name(embed_e));
+  free(prepared_vec);
 
   if (op->kind == ASPER_OP_ACCESS)
     asper_log(c, ASPER_LOG_DEBUG, "store", "access batch applied: %zu id(s)",
@@ -477,6 +530,7 @@ static void ctx_destroy(asper_ctx *c, bool store_opened) {
   os_mutex_destroy(&c->ev_mu);
   os_mutex_destroy(&c->log_mu);
   os_mutex_destroy(&c->err_mu);
+  os_mutex_destroy(&c->cache_mu);
   os_mutex_destroy(&c->journal_mu);
   os_rwlock_destroy(&c->lock);
   free(c);
@@ -502,6 +556,7 @@ asper_err asper_open_with(const asper_open_params *p,
   /* 1. Locks first: every later failure path may destroy them. */
   os_rwlock_init(&c->lock);
   os_mutex_init(&c->journal_mu);
+  os_mutex_init(&c->cache_mu);
   os_mutex_init(&c->err_mu);
   os_mutex_init(&c->ev_mu);
   os_mutex_init(&c->log_mu);
@@ -682,9 +737,8 @@ void asper_close(asper_ctx *c) {
   (void)asper_access_flush(c);
   (void)asper_journal_sync(c);
   (void)asper_store_compact(c);
-  if (c->cache_dirty && c->has_embedder) {
-    if (asper_cache_save(c) == ASPER_OK) c->cache_dirty = false;
-  }
+  if (c->has_embedder && asper_cache_needs_save(c))
+    (void)asper_cache_save(c);
   asper_log(c, ASPER_LOG_INFO, "store", "context closed");
   ctx_destroy(c, true);
 }
@@ -704,6 +758,8 @@ asper_err asper_observe_turn(asper_ctx *c, asper_role role,
     return asper_seterr(c, ASPER_ERR_INVALID, "invalid role");
   if (asper_str_blank(text_utf8))
     return asper_seterr(c, ASPER_ERR_INVALID, "empty turn text");
+  if (!asper_utf8_count(text_utf8, NULL))
+    return asper_seterr(c, ASPER_ERR_INVALID, "turn text is not valid UTF-8");
 
   copy = asper_strdup(text_utf8);
   if (!copy) return asper_seterr(c, ASPER_ERR_NOMEM, "out of memory");
@@ -763,6 +819,10 @@ asper_err asper_build_prompt(asper_ctx *c, const char *base_system_prompt,
   *out_prompt = NULL;
   if (!user_message)
     return asper_seterr(c, ASPER_ERR_INVALID, "user_message is NULL");
+  if (!asper_utf8_count(user_message, NULL) ||
+      (base_system_prompt && !asper_utf8_count(base_system_prompt, NULL)))
+    return asper_seterr(c, ASPER_ERR_INVALID,
+                        "prompt input is not valid UTF-8");
 
   /* Active project snapshot, taken once and used consistently. */
   os_rwlock_rdlock(&c->lock);
@@ -811,6 +871,8 @@ out:
 asper_err asper_recall(asper_ctx *c, const char *question, char **out_answer,
                        asper_record ***out_cited, size_t *out_cited_n) {
   asper_err e;
+  int64_t timeout_ms;
+  int64_t deadline;
 
   if (!c) return ASPER_ERR_INVALID;
   if (out_answer) *out_answer = NULL;
@@ -820,18 +882,29 @@ asper_err asper_recall(asper_ctx *c, const char *question, char **out_answer,
     return asper_seterr(c, ASPER_ERR_INVALID, "out_answer is required");
   if (asper_str_blank(question))
     return asper_seterr(c, ASPER_ERR_INVALID, "empty recall question");
+  if (!asper_utf8_count(question, NULL))
+    return asper_seterr(c, ASPER_ERR_INVALID,
+                        "recall question is not valid UTF-8");
   if (!c->has_curator)
     return asper_seterr(c, ASPER_ERR_MODEL,
                         "recall unavailable: no curator model");
 
-  if (c->no_threads)
-    return asper_recall_run(c, question, out_answer, out_cited, out_cited_n);
+  timeout_ms = c->cfg.recall_timeout_s > 0
+                   ? (int64_t)c->cfg.recall_timeout_s * 1000
+                   : 0;
+  deadline = timeout_ms > 0 ? os_monotonic_ms() + timeout_ms : 0;
+
+  if (c->no_threads) {
+    e = asper_recall_run(c, question, deadline, out_answer, out_cited,
+                         out_cited_n);
+    if (e == ASPER_ERR_BUSY)
+      return asper_seterr(c, e, "recall timed out after %lld s",
+                          (long long)c->cfg.recall_timeout_s);
+    return e;
+  }
 
   /* Acquire the cycle slot with timeout (protocol in asper_internal.h). */
   {
-    int64_t total_ms =
-        c->cfg.recall_timeout_s > 0 ? c->cfg.recall_timeout_s * 1000 : 0;
-    int64_t deadline = os_monotonic_ms() + total_ms;
     os_mutex_lock(&c->ev_mu);
     c->recall_waiting++;
     while (c->cycle_busy) {
@@ -851,13 +924,17 @@ asper_err asper_recall(asper_ctx *c, const char *question, char **out_answer,
   }
 
   /* The curator generation runs on the CALLER thread holding the slot. */
-  e = asper_recall_run(c, question, out_answer, out_cited, out_cited_n);
+  e = asper_recall_run(c, question, deadline, out_answer, out_cited,
+                       out_cited_n);
 
   os_mutex_lock(&c->ev_mu);
   c->cycle_busy = false;
   os_cond_broadcast(&c->done_cv);
   os_cond_signal(&c->ev_cv);
   os_mutex_unlock(&c->ev_mu);
+  if (e == ASPER_ERR_BUSY)
+    return asper_seterr(c, e, "recall timed out after %lld s",
+                        (long long)c->cfg.recall_timeout_s);
   return e;
 }
 
@@ -1051,7 +1128,6 @@ asper_err asper_memory_update(asper_ctx *c, const char *id,
   if (!c) return ASPER_ERR_INVALID;
   if (!id || !asper_uuid_valid(id))
     return asper_seterr(c, ASPER_ERR_INVALID, "invalid record id");
-
   memset(&op, 0, sizeof op);
   op.kind = ASPER_OP_UPDATE;
   op.at = asper_clock_now(&c->clock);
@@ -1072,6 +1148,9 @@ asper_err asper_memory_deprecate(asper_ctx *c, const char *id,
   if (!c) return ASPER_ERR_INVALID;
   if (!id || !asper_uuid_valid(id))
     return asper_seterr(c, ASPER_ERR_INVALID, "invalid record id");
+  if (reason && !asper_utf8_count(reason, NULL))
+    return asper_seterr(c, ASPER_ERR_INVALID,
+                        "deprecation reason is not valid UTF-8");
 
   memset(&op, 0, sizeof op);
   op.kind = ASPER_OP_DEPRECATE;
@@ -1116,6 +1195,8 @@ asper_err asper_memory_search(asper_ctx *c, asper_section s,
   *out_n = 0;
   if (!query)
     return asper_seterr(c, ASPER_ERR_INVALID, "query is NULL");
+  if (!asper_utf8_count(query, NULL))
+    return asper_seterr(c, ASPER_ERR_INVALID, "query is not valid UTF-8");
   if (s != ASPER_SECTION_IDENTITY && s != ASPER_SECTION_CONTEXT &&
       s != ASPER_SECTION_PROJECT && s != ASPER_SECTION_ANY)
     return asper_seterr(c, ASPER_ERR_INVALID, "invalid section");
@@ -1197,10 +1278,9 @@ asper_err asper_flush(asper_ctx *c, int full) {
   if (first == ASPER_OK) first = e;
   e = asper_store_compact(c);
   if (first == ASPER_OK) first = e;
-  if (c->cache_dirty && c->has_embedder) {
+  if (c->has_embedder && asper_cache_needs_save(c)) {
     e = asper_cache_save(c);
-    if (e == ASPER_OK) c->cache_dirty = false;
-    else if (first == ASPER_OK) first = e;
+    if (e != ASPER_OK && first == ASPER_OK) first = e;
   }
   return first;
 }

@@ -265,6 +265,44 @@ bool asper_base64_decode(const char *s, uint8_t **out, size_t *out_len) {
 
 /* ---- project slug ------------------------------------------------------- */
 
+bool asper_utf8_count(const char *s, size_t *out_chars) {
+  const unsigned char *p = (const unsigned char *)s;
+  size_t n = 0;
+
+  if (out_chars) *out_chars = 0;
+  if (!s) return false;
+  while (*p) {
+    uint32_t cp;
+    size_t need;
+    if (*p < 0x80) {
+      cp = *p;
+      need = 1;
+    } else if (*p >= 0xc2 && *p <= 0xdf) {
+      cp = (uint32_t)(*p & 0x1f);
+      need = 2;
+    } else if (*p >= 0xe0 && *p <= 0xef) {
+      cp = (uint32_t)(*p & 0x0f);
+      need = 3;
+    } else if (*p >= 0xf0 && *p <= 0xf4) {
+      cp = (uint32_t)(*p & 0x07);
+      need = 4;
+    } else {
+      return false;
+    }
+    for (size_t i = 1; i < need; i++) {
+      if ((p[i] & 0xc0) != 0x80) return false;
+      cp = (cp << 6) | (uint32_t)(p[i] & 0x3f);
+    }
+    if ((need == 3 && cp < 0x800) || (need == 4 && cp < 0x10000) ||
+        (cp >= 0xd800 && cp <= 0xdfff) || cp > 0x10ffff)
+      return false;
+    p += need;
+    n++;
+  }
+  if (out_chars) *out_chars = n;
+  return true;
+}
+
 bool asper_slug_valid(const char *s) {
   size_t i;
   if (!s) return false;

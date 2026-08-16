@@ -135,6 +135,34 @@ TEST(overlong_content_rejected) {
   asper_test_rmtree(root);
 }
 
+TEST(transient_generation_failure_retains_turns) {
+  char root[256];
+  asper_ctx *c;
+  asper_stats st;
+  ASSERT_TRUE(asper_test_tmpdir(root));
+  fake_curator_init(&g_cur);
+  fake_clock_set(&g_clk, T0);
+  c = open_store(root, NULL);
+  ASSERT_TRUE(c != NULL);
+  ASSERT_TRUE(fake_curator_push(&g_cur,
+                                "INSERT context | Retried fact survives\n"));
+  fake_curator_fail_next(&g_cur, ASPER_ERR_MODEL);
+  ASSERT_OK(asper_observe_turn(c, ASPER_ROLE_USER, "remember this fact"));
+  ASSERT_OK(asper_observe_turn(c, ASPER_ROLE_ASSISTANT, "noted"));
+  ASSERT_ERR(asper_flush(c, 1), ASPER_ERR_MODEL);
+  ASSERT_OK(asper_get_stats(c, &st));
+  ASSERT_EQ_INT(st.records_context, 0);
+  ASSERT_OK(asper_flush(c, 1));
+  ASSERT_OK(asper_get_stats(c, &st));
+  ASSERT_EQ_INT(st.records_context, 1);
+  ASSERT_EQ_INT(count_with_content(c, ASPER_SECTION_CONTEXT,
+                                   "Retried fact survives"), 1);
+  ASSERT_EQ_INT(g_cur.calls, 2);
+  asper_close(c);
+  fake_curator_dispose(&g_cur);
+  asper_test_rmtree(root);
+}
+
 TEST(insert_project_without_active_project_dropped) {
   char root[256];
   asper_ctx *c;
@@ -500,6 +528,7 @@ TEST(gbnf_shapes) {
 TEST_LIST = {
     TEST_ENTRY(scripted_insert_applied),
     TEST_ENTRY(overlong_content_rejected),
+    TEST_ENTRY(transient_generation_failure_retains_turns),
     TEST_ENTRY(insert_project_without_active_project_dropped),
     TEST_ENTRY(update_on_locked_dropped),
     TEST_ENTRY(identity_quorum_same_op_applies_second_time),

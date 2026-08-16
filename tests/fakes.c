@@ -93,13 +93,23 @@ int fake_curator_push(fake_curator *fc, const char *reply) {
   return 1;
 }
 
+void fake_curator_fail_next(fake_curator *fc, asper_err error) {
+  if (fc) fc->next_error = error;
+}
+
+void fake_curator_busy_on_deadline(fake_curator *fc, int enabled) {
+  if (fc) fc->busy_on_deadline = enabled != 0;
+}
+
 static asper_err fake_curator_generate(void *ud, const char *system_prompt,
                                        const char *user_prompt,
                                        const char *gbnf, int max_tokens,
+                                       int64_t deadline_ms,
                                        char **out_text) {
   fake_curator *fc = (fake_curator *)ud;
   const char *reply = "NOOP\n";
   (void)max_tokens;
+  (void)deadline_ms;
   if (!fc || !out_text) return ASPER_ERR_INVALID;
   free(fc->last_system);
   fc->last_system = asper_strdup(system_prompt);
@@ -108,6 +118,12 @@ static asper_err fake_curator_generate(void *ud, const char *system_prompt,
   free(fc->last_grammar);
   fc->last_grammar = asper_strdup(gbnf);
   fc->calls++;
+  if (fc->next_error != ASPER_OK) {
+    asper_err error = fc->next_error;
+    fc->next_error = ASPER_OK;
+    return error;
+  }
+  if (fc->busy_on_deadline && deadline_ms > 0) return ASPER_ERR_BUSY;
   if (fc->next < fc->n) reply = fc->replies[fc->next++];
   *out_text = asper_strdup(reply);
   return *out_text ? ASPER_OK : ASPER_ERR_NOMEM;
@@ -135,10 +151,23 @@ asper_curator_iface fake_curator_iface_make(fake_curator *fc) {
 /* ---- fake clock --------------------------------------------------------- */
 
 static asper_time fake_clock_now_cb(void *ud) {
-  return ((const fake_clock *)ud)->now;
+  fake_clock *fc = (fake_clock *)ud;
+  asper_time now;
+  os_mutex_lock(&fc->mu);
+  now = (asper_time)fc->now;
+  os_mutex_unlock(&fc->mu);
+  return now;
 }
 
-void fake_clock_set(fake_clock *fc, int64_t t) { fc->now = t; }
+void fake_clock_set(fake_clock *fc, int64_t t) {
+  if (!fc->initialized) {
+    os_mutex_init(&fc->mu);
+    fc->initialized = 1;
+  }
+  os_mutex_lock(&fc->mu);
+  fc->now = t;
+  os_mutex_unlock(&fc->mu);
+}
 
 asper_clock fake_clock_make(fake_clock *fc) {
   asper_clock c;

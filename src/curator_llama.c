@@ -61,6 +61,8 @@ static asper_err cll_tokenize(const struct llama_vocab *vocab,
 
   *out_tok = NULL;
   *out_n = 0;
+  if (strlen(text) > (size_t)INT32_MAX)
+    return ASPER_ERR_INVALID;
   len = (int32_t)strlen(text);
   n = llama_tokenize(vocab, text, len, NULL, 0, add_special, parse_special);
   if (n == INT32_MIN)
@@ -148,7 +150,8 @@ static asper_err cll_apply_template(const char *tmpl,
 
 static asper_err cll_generate(void *ud, const char *system_prompt,
                               const char *user_prompt, const char *gbnf,
-                              int max_tokens, char **out_text)
+                              int max_tokens, int64_t deadline_ms,
+                              char **out_text)
 {
   cll_ud *u = (cll_ud *)ud;
   char *prompt = NULL;
@@ -208,6 +211,10 @@ static asper_err cll_generate(void *ud, const char *system_prompt,
   llama_sampler_chain_add(chain, greedy);
 
   for (i = 0; i < n_tok; i += u->n_batch) {
+    if (deadline_ms > 0 && os_monotonic_ms() >= deadline_ms) {
+      e = ASPER_ERR_BUSY;
+      goto out;
+    }
     int32_t chunk = n_tok - i < u->n_batch ? n_tok - i : u->n_batch;
     struct llama_batch batch = llama_batch_get_one(tok + i, chunk);
     if (llama_decode(u->lctx, batch) != 0) {
@@ -220,6 +227,10 @@ static asper_err cll_generate(void *ud, const char *system_prompt,
   n_past = n_tok;
   produced = 0;
   while (produced < limit) {
+    if (deadline_ms > 0 && os_monotonic_ms() >= deadline_ms) {
+      e = ASPER_ERR_BUSY;
+      goto out;
+    }
     llama_token t = llama_sampler_sample(chain, u->lctx, -1);
     if (llama_vocab_is_eog(u->vocab, t))
       break;
@@ -266,6 +277,8 @@ static int cll_count_tokens(void *ud, const char *text)
 
   if (text == NULL)
     return 0;
+  if (strlen(text) > (size_t)INT32_MAX)
+    return -1;
   n = llama_tokenize(u->vocab, text, (int32_t)strlen(text), NULL, 0, false,
                      false);
   if (n == INT32_MIN)

@@ -144,8 +144,19 @@ void asper_time_format_rfc3339(asper_time t, char out[32]) {
   h = (int)(sod / 3600);
   mi = (int)((sod / 60) % 60);
   se = (int)(sod % 60);
+  /* `y` spans the full int64 range by design (see file header); snprintf's
+   * size argument already makes this memory-safe (truncates, never
+   * overflows), but GCC can't bound `y` to a realistic calendar year and
+   * flags a false positive for the astronomical end of that range. */
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wformat-truncation"
+#endif
   snprintf(out, 32, "%04lld-%02d-%02dT%02d:%02d:%02dZ", (long long)y, m, d, h,
            mi, se);
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic pop
+#endif
 }
 
 /* ---- ISO 8601 durations -------------------------------------------------- */

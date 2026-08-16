@@ -8,6 +8,18 @@ else()
   set(ASPER_C_FLAGS -Wall -Wextra -Wpedantic -Werror)
 endif()
 
+# Mirrors the top-level ASPER_C_DEFS: feature-test macros for POSIX APIs
+# (pthread_rwlock_t, etc.) pulled in via asper_internal.h/os.h. Must be a
+# compiler define, not a header #define — see the top-level CMakeLists.txt.
+if(WIN32 OR MSVC)
+  set(ASPER_C_DEFS)
+else()
+  set(ASPER_C_DEFS _POSIX_C_SOURCE=200809L _FILE_OFFSET_BITS=64)
+  if(APPLE)
+    list(APPEND ASPER_C_DEFS _DARWIN_C_SOURCE)
+  endif()
+endif()
+
 set(ASPER_TEST_PROGRAMS
   test_util
   test_time
@@ -47,6 +59,7 @@ foreach(test_name IN LISTS ASPER_TEST_PROGRAMS)
     C_STANDARD_REQUIRED ON
     C_EXTENSIONS OFF)
   target_compile_options(${test_name} PRIVATE ${ASPER_C_FLAGS})
+  target_compile_definitions(${test_name} PRIVATE ${ASPER_C_DEFS})
   target_link_libraries(${test_name} PRIVATE asper_static)
 
   add_test(NAME ${test_name} COMMAND ${test_name})

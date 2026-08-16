@@ -124,12 +124,20 @@ const float *asper_index_vec(const asper_index *ix, const asper_record *r)
 
 double asper_cosine(const float *a, const float *b, int dim)
 {
-    double acc = 0.0;
-    int i;
+    float a0 = 0.0f, a1 = 0.0f, a2 = 0.0f, a3 = 0.0f;
+    int i = 0;
 
-    for (i = 0; i < dim; i++)
-        acc += (double)a[i] * (double)b[i];
-    return acc;
+    /* Four independent float accumulators expose a vector-friendly hot loop.
+     * Embeddings are float32 and normalized, so double products only added
+     * conversion cost without providing meaningful ranking precision. */
+    for (; i + 3 < dim; i += 4) {
+        a0 += a[i] * b[i];
+        a1 += a[i + 1] * b[i + 1];
+        a2 += a[i + 2] * b[i + 2];
+        a3 += a[i + 3] * b[i + 3];
+    }
+    for (; i < dim; i++) a0 += a[i] * b[i];
+    return (double)((a0 + a1) + (a2 + a3));
 }
 
 /* Section/project/status filter:

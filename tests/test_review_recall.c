@@ -259,6 +259,28 @@ TEST(recall_citations_optional) {
   asper_test_rmtree(root);
 }
 
+TEST(recall_passes_generation_deadline) {
+  char root[256], id[37];
+  asper_ctx *c;
+  char *answer = NULL;
+  ASSERT_TRUE(asper_test_tmpdir(root));
+  fake_curator_init(&g_cur);
+  fake_clock_set(&g_clk, T0);
+  c = open_store(root, 1);
+  ASSERT_TRUE(c != NULL);
+  ASSERT_OK(asper_memory_insert(c, ASPER_SECTION_CONTEXT, NULL,
+                                "The user speaks Italian", 0, id));
+  fake_curator_busy_on_deadline(&g_cur, 1);
+  ASSERT_ERR(asper_recall(c, "what language does the user speak", &answer,
+                          NULL, NULL),
+             ASPER_ERR_BUSY);
+  ASSERT_TRUE(answer == NULL);
+  ASSERT_TRUE(strstr(asper_last_error(c), "timed out") != NULL);
+  asper_close(c);
+  fake_curator_dispose(&g_cur);
+  asper_test_rmtree(root);
+}
+
 TEST_LIST = {
     TEST_ENTRY(review_deprecate_confirmed),
     TEST_ENTRY(review_keep_rescues),
@@ -268,6 +290,7 @@ TEST_LIST = {
     TEST_ENTRY(recall_nomem_maps_to_not_found),
     TEST_ENTRY(recall_without_curator_is_model_error),
     TEST_ENTRY(recall_citations_optional),
+    TEST_ENTRY(recall_passes_generation_deadline),
 };
 
 RUN_ALL_TESTS()

@@ -120,6 +120,48 @@ static asper_err take_turns(asper_ctx *c, bool force, asper_turn **out,
   return ASPER_OK;
 }
 
+/* Put an in-flight batch back at the head of the FIFO after a transient
+ * failure. New turns may have arrived while generation was running; those
+ * stay behind the restored batch so ordering is preserved. */
+static bool restore_turns(asper_ctx *c, asper_turn *turns, size_t n)
+{
+  asper_turn *grown;
+  size_t need, cap;
+
+  if (!turns || n == 0)
+    return true;
+  os_mutex_lock(&c->ev_mu);
+  if (n > SIZE_MAX - c->turns_n) {
+    os_mutex_unlock(&c->ev_mu);
+    return false;
+  }
+  need = n + c->turns_n;
+  if (need > c->turns_cap) {
+    cap = c->turns_cap ? c->turns_cap : 16;
+    while (cap < need) {
+      if (cap > SIZE_MAX / 2) {
+        cap = need;
+        break;
+      }
+      cap *= 2;
+    }
+    grown = realloc(c->turns, cap * sizeof *grown);
+    if (!grown) {
+      os_mutex_unlock(&c->ev_mu);
+      return false;
+    }
+    c->turns = grown;
+    c->turns_cap = cap;
+  }
+  memmove(c->turns + n, c->turns, c->turns_n * sizeof *c->turns);
+  memcpy(c->turns, turns, n * sizeof *turns);
+  c->turns_n += n;
+  memset(turns, 0, n * sizeof *turns); /* ownership moved back to the FIFO */
+  os_cond_signal(&c->ev_cv);
+  os_mutex_unlock(&c->ev_mu);
+  return true;
+}
+
 static size_t drop_all_turns(asper_ctx *c)
 {
   os_mutex_lock(&c->ev_mu);
@@ -405,8 +447,13 @@ static cycle_op_result cycle_do_insert(asper_ctx *c, const asper_cop *cop,
     count_drop(c, what, "empty text");
     return CYCLE_OP_REJECTED;
   }
+  size_t text_chars;
+  if (!asper_utf8_count(text, &text_chars)) {
+    count_drop(c, what, "content is not valid UTF-8");
+    return CYCLE_OP_REJECTED;
+  }
   if (c->cfg.content_max_chars > 0 &&
-      strlen(text) > (size_t)c->cfg.content_max_chars) {
+      text_chars > (size_t)c->cfg.content_max_chars) {
     char why[48];
     snprintf(why, sizeof why, "text exceeds %d chars",
              c->cfg.content_max_chars);
@@ -530,8 +577,13 @@ static cycle_op_result cycle_do_mutate(asper_ctx *c, const asper_cop *cop,
       count_drop(c, what, "empty text");
       return CYCLE_OP_REJECTED;
     }
+    size_t text_chars;
+    if (!asper_utf8_count(text, &text_chars)) {
+      count_drop(c, what, "content is not valid UTF-8");
+      return CYCLE_OP_REJECTED;
+    }
     if (c->cfg.content_max_chars > 0 &&
-        strlen(text) > (size_t)c->cfg.content_max_chars) {
+        text_chars > (size_t)c->cfg.content_max_chars) {
       char why[48];
       snprintf(why, sizeof why, "text exceeds %d chars",
                c->cfg.content_max_chars);
@@ -670,10 +722,10 @@ asper_err asper_curation_cycle(asper_ctx *c, bool force)
 
   instr = load_instruction(c, &instr_heap);
   rc = c->curator.generate(c->curator.ud, instr, prompt, gbnf,
-                           CURATOR_CYCLE_MAX_TOKENS, &reply);
+                           CURATOR_CYCLE_MAX_TOKENS, 0, &reply);
   if (rc != ASPER_OK) {
     asper_log(c, ASPER_LOG_ERROR, "curator",
-              "generation failed (%s): %zu turn(s) dropped",
+              "generation failed (%s): retaining %zu turn(s) for retry",
               asper_err_name(rc), n_turns);
     asper_seterr(c, rc, "curator generation failed");
     goto out;
@@ -753,6 +805,10 @@ asper_err asper_curation_cycle(asper_ctx *c, bool force)
   rc = ASPER_OK;
 
 out:
+  if (rc != ASPER_OK && !restore_turns(c, turns, n_turns))
+    asper_log(c, ASPER_LOG_ERROR, "curator",
+              "could not restore %zu turn(s) after failure: out of memory",
+              n_turns);
   asper_cops_free(cops, n_cops);
   free(reply);
   free(instr_heap);
@@ -765,7 +821,8 @@ out:
 
 fail:
   asper_log(c, ASPER_LOG_ERROR, "curator",
-            "cycle aborted (%s): %zu turn(s) dropped", asper_err_name(rc),
+            "cycle aborted (%s): retaining %zu turn(s) for retry",
+            asper_err_name(rc),
             n_turns);
   asper_seterr(c, rc, "curation cycle failed: %s", asper_err_name(rc));
   goto out;
@@ -865,12 +922,16 @@ asper_err asper_maintenance_review(asper_ctx *c, bool force)
   int64_t t0 = os_monotonic_ms();
   asper_time now = asper_clock_now(&c->clock);
 
+  os_mutex_lock(&c->ev_mu);
   if (!force && c->last_maintenance != 0 &&
-      now - c->last_maintenance < c->cfg.maintenance_interval_s)
+      now - c->last_maintenance < c->cfg.maintenance_interval_s) {
+    os_mutex_unlock(&c->ev_mu);
     return ASPER_OK;
+  }
 
   /* Bumped whenever the review runs, even when it decides to do nothing. */
   c->last_maintenance = now;
+  os_mutex_unlock(&c->ev_mu);
 
   if (!c->has_curator) {
     asper_log(c, ASPER_LOG_DEBUG, "curator",
@@ -907,7 +968,7 @@ asper_err asper_maintenance_review(asper_ctx *c, bool force)
   }
 
   rc = c->curator.generate(c->curator.ud, ASPER_REVIEW_INSTRUCTION, prompt,
-                           gbnf, CURATOR_REVIEW_MAX_TOKENS, &reply);
+                           gbnf, CURATOR_REVIEW_MAX_TOKENS, 0, &reply);
   if (rc != ASPER_OK) {
     asper_log(c, ASPER_LOG_ERROR, "curator", "review generation failed (%s)",
               asper_err_name(rc));
@@ -1015,6 +1076,7 @@ static asper_err build_recall_prompt(const char *question,
 }
 
 asper_err asper_recall_run(asper_ctx *c, const char *question,
+                           int64_t deadline_ms,
                            char **out_answer, asper_record ***out_cited,
                            size_t *out_cited_n)
 {
@@ -1075,7 +1137,8 @@ asper_err asper_recall_run(asper_ctx *c, const char *question,
   }
 
   rc = c->curator.generate(c->curator.ud, ASPER_RECALL_INSTRUCTION, prompt,
-                           gbnf, c->cfg.recall_answer_tokens, &reply);
+                           gbnf, c->cfg.recall_answer_tokens, deadline_ms,
+                           &reply);
   if (rc != ASPER_OK) {
     asper_log(c, ASPER_LOG_ERROR, "recall", "generation failed (%s)",
               asper_err_name(rc));

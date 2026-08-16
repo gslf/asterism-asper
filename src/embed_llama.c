@@ -142,6 +142,8 @@ static asper_err ell_tokenize(const struct llama_vocab *vocab,
 
   *out_tok = NULL;
   *out_n = 0;
+  if (strlen(text) > (size_t)INT32_MAX)
+    return ASPER_ERR_INVALID;
   len = (int32_t)strlen(text);
   n = llama_tokenize(vocab, text, len, NULL, 0, add_special, parse_special);
   if (n == INT32_MIN)

@@ -178,7 +178,9 @@ typedef struct {
 asper_err asper_get_stats(asper_ctx *c, asper_stats *out);
 
 /* Callback sink, independent of the file log. level: ASPER_LOG_*. The
- * default callback writes WARN and ERROR to stderr. fn NULL disables. */
+ * callback may be invoked concurrently and may re-enter libasper; userdata
+ * synchronization belongs to the host. The default callback writes WARN and
+ * ERROR to stderr. fn NULL disables. */
 typedef void (*asper_log_fn)(int level, const char *msg, void *userdata);
 void asper_set_logger(asper_ctx *c, asper_log_fn fn, void *userdata);
 

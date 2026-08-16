@@ -288,6 +288,17 @@ static bool asper_cache_savable(const asper_ctx *c, const asper_record *r,
     return true;
 }
 
+bool asper_cache_needs_save(asper_ctx *c)
+{
+    bool dirty;
+    if (!c)
+        return false;
+    os_rwlock_rdlock(&c->lock);
+    dirty = c->cache_dirty;
+    os_rwlock_rdunlock(&c->lock);
+    return dirty;
+}
+
 asper_err asper_cache_save(asper_ctx *c)
 {
     const asper_table *t;
@@ -305,6 +316,7 @@ asper_err asper_cache_save(asper_ctx *c)
         return ASPER_ERR_INVALID;
 
     asper_buf_init(&snap);
+    os_mutex_lock(&c->cache_mu);
 
     /* Snapshot phase: table + index rows are guarded by c->lock, so
      * header + entries are serialized into memory under the WRITE lock.
@@ -316,6 +328,7 @@ asper_err asper_cache_save(asper_ctx *c)
     if (dim <= 0) {
         os_rwlock_wrunlock(&c->lock);
         asper_buf_free(&snap);
+        os_mutex_unlock(&c->cache_mu);
         return asper_seterr(c, ASPER_ERR_INVALID,
                             "cache: index has no dimension");
     }
@@ -432,5 +445,6 @@ out:
     free(tmp);
     free(entry);
     asper_buf_free(&snap);
+    os_mutex_unlock(&c->cache_mu);
     return e;
 }

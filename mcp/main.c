@@ -48,8 +48,9 @@ static const char HELP[] =
     "  --help           print this help and exit\n"
     "  --version        print the version and exit\n"
     "\n"
-    "The server speaks JSON-RPC 2.0 over stdio (MCP protocol revision\n"
-    "2025-06-18), one compact JSON message per line. Memory records in\n"
+    "The server speaks JSON-RPC 2.0 over stdio (legacy MCP 2025-06-18\n"
+    "and modern MCP 2026-07-28), one compact JSON message per line.\n"
+    "Memory records in\n"
     "tool results are JSON objects; their timestamps are integer unix\n"
     "seconds (UTC) in the fields created_at_unix, updated_at_unix and\n"
     "last_access_unix.\n";
@@ -80,12 +81,33 @@ static void send_value(jx_value *resp) {
 }
 
 /* want == 0: notification — consume the owned arguments, emit nothing. */
-static void send_result(int want, jx_value *id, jx_value *result) {
+static int decorate_modern_result(jx_value *result) {
+  jx_value *meta, *info;
+  int ok;
+  if (!result || jx_typeof(result) != JX_OBJECT) return 0;
+  meta = jx_object();
+  info = jx_object();
+  ok = (meta != NULL && info != NULL);
+  ok &= jx_object_set(info, "name", jx_string("asper-mcp")) == 0;
+  ok &= jx_object_set(info, "version", jx_string(asper_version())) == 0;
+  ok &= jx_object_set(meta, "io.modelcontextprotocol/serverInfo", info) == 0;
+  ok &= jx_object_set(result, "resultType", jx_string("complete")) == 0;
+  ok &= jx_object_set(result, "_meta", meta) == 0;
+  return ok;
+}
+
+static void send_result(int want, jx_value *id, jx_value *result, int modern) {
   jx_value *resp;
   int ok;
   if (!want) {
     jx_free(id);
     jx_free(result);
+    return;
+  }
+  if (modern && !decorate_modern_result(result)) {
+    jx_free(id);
+    jx_free(result);
+    emit_line(OOM_RESPONSE);
     return;
   }
   resp = jx_object();
@@ -133,7 +155,7 @@ static void send_error(int want, jx_value *id, int code, const char *message,
 
 /* Wrap a tool payload in the MCP content envelope and send it. */
 static void send_tool_result(int want, jx_value *id, jx_value *payload,
-                             int is_error) {
+                             int is_error, int modern) {
   char *txt;
   jx_value *item, *content, *res;
   int ok;
@@ -165,7 +187,7 @@ static void send_tool_result(int want, jx_value *id, jx_value *payload,
     emit_line(OOM_RESPONSE);
     return;
   }
-  send_result(1, id, res);
+  send_result(1, id, res, modern);
 }
 
 /* ═══════════════════════ name maps ═══════════════════════ */
@@ -812,7 +834,27 @@ static jx_value *initialize_result(void) {
   return res;
 }
 
-static void handle_tools_list(int want, jx_value *rid) {
+static jx_value *discover_result(void) {
+  jx_value *res = jx_object();
+  jx_value *versions = jx_array();
+  jx_value *caps = jx_object();
+  int ok = (res != NULL && versions != NULL && caps != NULL);
+  ok &= jx_array_push(versions, jx_string("2026-07-28")) == 0;
+  ok &= jx_object_set(caps, "tools", jx_object()) == 0;
+  ok &= jx_object_set(res, "supportedVersions", versions) == 0;
+  ok &= jx_object_set(res, "capabilities", caps) == 0;
+  ok &= jx_object_set(res, "instructions",
+                      jx_string("Persistent memory tools for Asper.")) == 0;
+  ok &= jx_object_set(res, "ttlMs", jx_int(3600000)) == 0;
+  ok &= jx_object_set(res, "cacheScope", jx_string("private")) == 0;
+  if (!ok) {
+    jx_free(res);
+    return NULL;
+  }
+  return res;
+}
+
+static void handle_tools_list(int want, jx_value *rid, int modern) {
   jx_value *arr = jx_array();
   jx_value *res;
   int ok = (arr != NULL);
@@ -850,11 +892,11 @@ static void handle_tools_list(int want, jx_value *rid) {
     send_error(want, rid, -32603, "out of memory", NULL);
     return;
   }
-  send_result(want, rid, res);
+  send_result(want, rid, res, modern);
 }
 
 static void handle_tools_call(asper_ctx *c, int want, jx_value *rid,
-                              const jx_value *params) {
+                              const jx_value *params, int modern) {
   const char *name = NULL;
   const jx_value *args;
   const tool_def *tool = NULL;
@@ -894,7 +936,7 @@ static void handle_tools_call(asper_ctx *c, int want, jx_value *rid,
   rc = tool->fn(c, args, &payload, &aerr, &pmsg);
   switch (rc) {
   case TOOL_OK:
-    send_tool_result(want, rid, payload, 0);
+    send_tool_result(want, rid, payload, 0, modern);
     break;
   case TOOL_ASPER: {
     jx_value *ep = asper_error_payload(c, aerr);
@@ -903,7 +945,7 @@ static void handle_tools_call(asper_ctx *c, int want, jx_value *rid,
                  asper_err_name(aerr));
       break;
     }
-    send_tool_result(want, rid, ep, 1);
+    send_tool_result(want, rid, ep, 1, modern);
     break;
   }
   case TOOL_PARAM:
@@ -916,10 +958,11 @@ static void handle_tools_call(asper_ctx *c, int want, jx_value *rid,
 }
 
 static void handle_request(asper_ctx *c, jx_value *req) {
-  const jx_value *idv, *ver, *methv;
+  const jx_value *idv, *ver, *methv, *protocolv = NULL;
   const char *method;
   jx_value *rid;
   int has_id;
+  int modern = 0;
 
   if (jx_typeof(req) == JX_ARRAY) {
     send_error(1, NULL, -32600, "batch requests are not supported", NULL);
@@ -933,36 +976,69 @@ static void handle_request(asper_ctx *c, jx_value *req) {
   has_id = (idv != NULL);
   ver = jx_object_get(req, "jsonrpc");
   methv = jx_object_get(req, "method");
-  if (!ver || jx_typeof(ver) != JX_STRING ||
-      strcmp(jx_string_value(ver), "2.0") != 0 || !methv ||
-      jx_typeof(methv) != JX_STRING) {
+  if (has_id && jx_typeof(idv) != JX_STRING &&
+      !(jx_typeof(idv) == JX_NUMBER && jx_is_int(idv))) {
+    send_error(1, NULL, -32600, "invalid JSON-RPC request id", NULL);
+    return;
+  }
+  if (!ver || jx_typeof(ver) != JX_STRING || jx_string_length(ver) != 3 ||
+      memcmp(jx_string_value(ver), "2.0", 3) != 0 || !methv ||
+      jx_typeof(methv) != JX_STRING ||
+      jx_string_length(methv) != strlen(jx_string_value(methv))) {
     send_error(has_id, jx_clone(idv), -32600,
                "invalid JSON-RPC 2.0 request", NULL);
     return;
   }
   method = jx_string_value(methv);
+  {
+    const jx_value *params = jx_object_get(req, "params");
+    const jx_value *meta = params && jx_typeof(params) == JX_OBJECT
+                               ? jx_object_get(params, "_meta")
+                               : NULL;
+    protocolv = meta && jx_typeof(meta) == JX_OBJECT
+                    ? jx_object_get(meta,
+                        "io.modelcontextprotocol/protocolVersion")
+                    : NULL;
+    modern = protocolv && jx_typeof(protocolv) == JX_STRING &&
+             jx_string_length(protocolv) == 10 &&
+             memcmp(jx_string_value(protocolv), "2026-07-28", 10) == 0;
+  }
   /* "notifications/..." methods are ignored only as true notifications
    * (no id); an id-carrying request must get a response, so it falls
    * through to the normal dispatch (=> -32601 when unknown). */
   if (!has_id && strncmp(method, "notifications/", 14) == 0) return;
 
   rid = jx_clone(idv); /* NULL (=> null id) when absent or on OOM */
+  if (has_id && !rid) {
+    send_error(1, NULL, -32603, "out of memory", NULL);
+    return;
+  }
+  if (protocolv && !modern && strcmp(method, "server/discover") != 0) {
+    send_error(has_id, rid, -32022, "unsupported MCP protocol version", NULL);
+    return;
+  }
   if (strcmp(method, "initialize") == 0) {
     jx_value *res = initialize_result();
     if (!res) send_error(has_id, rid, -32603, "out of memory", NULL);
-    else send_result(has_id, rid, res);
+    else send_result(has_id, rid, res, 0);
+    return;
+  }
+  if (strcmp(method, "server/discover") == 0) {
+    jx_value *res = discover_result();
+    if (!res) send_error(has_id, rid, -32603, "out of memory", NULL);
+    else send_result(has_id, rid, res, 1);
     return;
   }
   if (strcmp(method, "ping") == 0) {
-    send_result(has_id, rid, jx_object());
+    send_result(has_id, rid, jx_object(), modern);
     return;
   }
   if (strcmp(method, "tools/list") == 0) {
-    handle_tools_list(has_id, rid);
+    handle_tools_list(has_id, rid, modern);
     return;
   }
   if (strcmp(method, "tools/call") == 0) {
-    handle_tools_call(c, has_id, rid, jx_object_get(req, "params"));
+    handle_tools_call(c, has_id, rid, jx_object_get(req, "params"), modern);
     return;
   }
   send_error(has_id, rid, -32601, "method not found", NULL);

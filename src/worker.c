@@ -107,8 +107,9 @@ asper_err asper_access_flush(asper_ctx *c) {
 asper_err asper_run_due_work(asper_ctx *c, bool force_cycle, bool full) {
   asper_err first = ASPER_OK, e;
   size_t tn;
-  asper_time lta, now;
+  asper_time lta, last_maintenance, now;
   bool batch_trig, idle_trig, run_cycle, maint_due;
+  size_t journal_ops;
 
   if (!c) return ASPER_ERR_INVALID;
   now = asper_clock_now(&c->clock);
@@ -116,6 +117,7 @@ asper_err asper_run_due_work(asper_ctx *c, bool force_cycle, bool full) {
   os_mutex_lock(&c->ev_mu);
   tn = c->turns_n;
   lta = c->last_turn_at;
+  last_maintenance = c->last_maintenance;
   os_mutex_unlock(&c->ev_mu);
 
   batch_trig = c->cfg.turn_batch > 0 && tn >= (size_t)c->cfg.turn_batch;
@@ -123,7 +125,7 @@ asper_err asper_run_due_work(asper_ctx *c, bool force_cycle, bool full) {
               now - lta >= c->cfg.idle_flush_s;
   run_cycle = tn > 0 && (force_cycle || batch_trig || idle_trig);
   maint_due = c->cfg.maintenance_interval_s > 0 &&
-              now - c->last_maintenance >= c->cfg.maintenance_interval_s;
+              now - last_maintenance >= c->cfg.maintenance_interval_s;
 
   if (c->has_curator && (run_cycle || full || maint_due)) {
     bool use_slot = !c->no_threads;
@@ -144,14 +146,16 @@ asper_err asper_run_due_work(asper_ctx *c, bool force_cycle, bool full) {
   e = asper_journal_sync(c);
   if (first == ASPER_OK) first = e;
 
-  if (full || c->store.journal_ops > (size_t)c->cfg.journal_max_ops) {
+  os_mutex_lock(&c->journal_mu);
+  journal_ops = c->store.journal_ops;
+  os_mutex_unlock(&c->journal_mu);
+  if (full || journal_ops > (size_t)c->cfg.journal_max_ops) {
     e = asper_store_compact(c);
     if (first == ASPER_OK) first = e;
   }
-  if (c->cache_dirty && c->has_embedder) {
+  if (c->has_embedder && asper_cache_needs_save(c)) {
     e = asper_cache_save(c);
-    if (e == ASPER_OK) c->cache_dirty = false;
-    else if (first == ASPER_OK) first = e;
+    if (e != ASPER_OK && first == ASPER_OK) first = e;
   }
   return first;
 }
@@ -170,12 +174,16 @@ asper_err asper_tick(asper_ctx *c) {
  * Called with ev_mu held; releases it around the store work (compaction
  * takes the table/journal locks itself). */
 static void worker_maybe_compact(asper_ctx *c) {
-  if (c->store.journal_ops <= (size_t)c->cfg.journal_max_ops) return;
+  size_t journal_ops;
+  os_mutex_lock(&c->journal_mu);
+  journal_ops = c->store.journal_ops;
+  os_mutex_unlock(&c->journal_mu);
+  if (journal_ops <= (size_t)c->cfg.journal_max_ops) return;
   os_mutex_unlock(&c->ev_mu);
   (void)asper_access_flush(c);
   (void)asper_store_compact(c);
-  if (c->cache_dirty && c->has_embedder && asper_cache_save(c) == ASPER_OK)
-    c->cache_dirty = false;
+  if (c->has_embedder && asper_cache_needs_save(c))
+    (void)asper_cache_save(c);
   os_mutex_lock(&c->ev_mu);
 }
 
@@ -208,13 +216,16 @@ static void *asper_worker_main(void *arg) {
       /* Idle flush with fewer than turn_batch turns forces a partial
        * batch through the cycle. */
       bool force = idle_trig && !batch_trig;
+      asper_err cycle_rc;
       c->cycle_busy = true;
       os_mutex_unlock(&c->ev_mu);
-      (void)asper_curation_cycle(c, force);
+      cycle_rc = asper_curation_cycle(c, force);
       os_mutex_lock(&c->ev_mu);
       c->cycle_busy = false;
       os_cond_broadcast(&c->done_cv);
       worker_maybe_compact(c);
+      if (cycle_rc != ASPER_OK && !c->stop_worker)
+        (void)os_cond_timedwait(&c->ev_cv, &c->ev_mu, 1000);
       continue;
     }
     if (can_work && maint_due) {

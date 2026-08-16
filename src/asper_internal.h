@@ -71,6 +71,8 @@ char *asper_strndup(const char *s, size_t n);
 /* Trim leading/trailing ASCII whitespace in place; returns s. */
 char *asper_str_trim(char *s);
 bool  asper_str_blank(const char *s);         /* NULL/empty/whitespace  */
+/* Strict RFC 3629 validation and Unicode scalar-value count. */
+bool  asper_utf8_count(const char *s, size_t *out_chars);
 
 uint64_t asper_fnv1a64(const void *data, size_t len);
 
@@ -363,6 +365,7 @@ asper_err asper_cache_load(asper_ctx *c, size_t **out_stale,
                            size_t *out_stale_n);
 /* Rewrite embeddings.bin from the current index (atomic replace). */
 asper_err asper_cache_save(asper_ctx *c);
+bool      asper_cache_needs_save(asper_ctx *c);
 
 /* ═══════════════════════ index.c ═══════════════════════ */
 
@@ -441,7 +444,8 @@ typedef struct {
    * not assume thread affinity. */
   asper_err (*generate)(void *ud, const char *system_prompt,
                         const char *user_prompt, const char *gbnf,
-                        int max_tokens, char **out_text);
+                        int max_tokens, int64_t deadline_ms,
+                        char **out_text);
   /* Token count with the curator tokenizer; <0 on error. Any thread. */
   int (*count_tokens)(void *ud, const char *text);
   void (*destroy)(void *ud);
@@ -589,6 +593,7 @@ asper_err asper_maintenance_review(asper_ctx *c, bool force);
 /* Recall, executed on the worker (or synchronously without
  * threads). */
 asper_err asper_recall_run(asper_ctx *c, const char *question,
+                           int64_t deadline_ms,
                            char **out_answer, asper_record ***out_cited,
                            size_t *out_cited_n);
 
@@ -641,6 +646,7 @@ struct asper_ctx {
   /* concurrency */
   os_rwlock lock;               /* table + index + active_project + stats */
   os_mutex journal_mu;
+  os_mutex cache_mu;             /* serializes cache snapshots/replaces */
   os_mutex err_mu;
   char err_buf[512];
 

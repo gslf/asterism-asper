@@ -50,6 +50,22 @@ jobs:
       - name: Test
         run: ctest --test-dir build --output-on-failure
 
+  no-threads:
+    name: linux-no-threads
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - name: Configure
+        run: >
+          cmake -B build -DCMAKE_BUILD_TYPE=Release
+          -DASPER_WITH_LLAMA=OFF -DASPER_NO_THREADS=ON
+      - name: Build
+        run: cmake --build build -j 4
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
   llama-build:
     name: linux-with-llama (build only)
     runs-on: ubuntu-latest

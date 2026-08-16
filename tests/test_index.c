@@ -232,7 +232,7 @@ TEST(scan_deterministic_order) {
   /* equal vectors + w_recency 0 => equal scores; the order must fall back
    * to updated_at desc, then id asc */
   asper_config cfg;
-  fake_clock fclk;
+  fake_clock fclk = {0};
   asper_clock clk;
   asper_index ix;
   asper_record *ra, *rb, *rc;

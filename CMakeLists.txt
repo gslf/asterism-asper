@@ -8,9 +8,6 @@ option(ASPER_NO_THREADS  "Single-threaded build (asper_tick)"    OFF)
 option(ASPER_SANITIZERS  "Enable ASan/UBSan"                     OFF)
 option(ASPER_WITH_LLAMA  "Build llama.cpp backends"              ON)
 
-set(CMAKE_C_STANDARD 99)
-set(CMAKE_C_STANDARD_REQUIRED ON)
-set(CMAKE_C_EXTENSIONS OFF)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 if(NOT CMAKE_BUILD_TYPE)
@@ -22,6 +19,21 @@ if(MSVC)
   set(ASPER_C_FLAGS /W4 /WX)
 else()
   set(ASPER_C_FLAGS -Wall -Wextra -Wpedantic -Werror)
+endif()
+
+# Feature-test macros for POSIX APIs (pthread_rwlock_t, etc.) used across
+# libasper's translation units. Passed on the compiler command line rather
+# than #define'd in a shared header, since glibc's <features.h> locks in
+# its visibility decisions at the first system header any given .c file
+# includes — and that first include isn't consistently os.h/asper_internal.h
+# across the codebase. Mirrors what os_posix.c defines for itself.
+if(WIN32 OR MSVC)
+  set(ASPER_C_DEFS)
+else()
+  set(ASPER_C_DEFS _POSIX_C_SOURCE=200809L _FILE_OFFSET_BITS=64)
+  if(APPLE)
+    list(APPEND ASPER_C_DEFS _DARWIN_C_SOURCE)
+  endif()
 endif()
 
 if(ASPER_SANITIZERS AND NOT MSVC)
@@ -94,7 +106,12 @@ add_library(asper_obj OBJECT ${ASPER_SOURCES})
 target_include_directories(asper_obj
   PUBLIC  ${CMAKE_CURRENT_SOURCE_DIR}/include
   PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+set_target_properties(asper_obj PROPERTIES
+  C_STANDARD 99
+  C_STANDARD_REQUIRED ON
+  C_EXTENSIONS OFF)
 target_compile_options(asper_obj PRIVATE ${ASPER_C_FLAGS})
+target_compile_definitions(asper_obj PRIVATE ${ASPER_C_DEFS})
 target_link_libraries(asper_obj PUBLIC xcdn)
 if(ASPER_NO_THREADS)
   target_compile_definitions(asper_obj PUBLIC ASPER_NO_THREADS)
@@ -112,6 +129,9 @@ set_target_properties(asper_shared PROPERTIES OUTPUT_NAME asper)
 foreach(tgt asper_static asper_shared)
   target_include_directories(${tgt} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
   target_link_libraries(${tgt} PUBLIC xcdn)
+  if(ASPER_NO_THREADS)
+    target_compile_definitions(${tgt} PUBLIC ASPER_NO_THREADS)
+  endif()
   if(ASPER_WITH_LLAMA)
     target_link_libraries(${tgt} PUBLIC llama)
   endif()
@@ -131,7 +151,12 @@ if(ASPER_BUILD_MCP)
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${CMAKE_CURRENT_SOURCE_DIR}/src
     ${CMAKE_CURRENT_SOURCE_DIR}/mcp)
+  set_target_properties(asper-mcp PROPERTIES
+    C_STANDARD 99
+    C_STANDARD_REQUIRED ON
+    C_EXTENSIONS OFF)
   target_compile_options(asper-mcp PRIVATE ${ASPER_C_FLAGS})
+  target_compile_definitions(asper-mcp PRIVATE ${ASPER_C_DEFS})
   target_link_libraries(asper-mcp PRIVATE asper_static)
 endif()
 

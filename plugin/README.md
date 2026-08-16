@@ -46,4 +46,4 @@ mode, drop the models in:
 
 To customize further (budgets, retrieval weights, model paths, logging), place
 a `config.xcdn` in `PLUGIN_DATA` and add `"--config", "config.xcdn"` to the
-`args` in `mcp.json` (§11 of [SPEC.txt](../docs/SPEC.txt) lists every key).
+`args` in `mcp.json` (§11 of [SPECS.md](../docs/SPECS.md) lists every key).
