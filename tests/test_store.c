@@ -370,11 +370,11 @@ TEST(manual_op_validation) {
   ASSERT_ERR(
       asper_memory_insert(c, ASPER_SECTION_CONTEXT, NULL, "  \t ", 0, id),
       ASPER_ERR_INVALID);
-  /* content_max_chars counts characters, not encoded bytes. */
-  for (size_t i = 0; i < 500; i++) {
-    unicode[i * 2] = (char)0xc3;
-    unicode[i * 2 + 1] = (char)0xa9;
-  }
+  /* content_max_chars counts characters, not encoded bytes. The two bytes
+   * of U+00E9 come from a string literal rather than (char)0xc3 casts:
+   * char is signed under MSVC, so casting a constant above CHAR_MAX is
+   * C4310 — fatal under /W4 /WX. */
+  for (size_t i = 0; i < 500; i++) memcpy(unicode + i * 2, "\xc3\xa9", 2);
   unicode[1000] = '\0';
   ASSERT_OK(asper_memory_insert(c, ASPER_SECTION_CONTEXT, NULL, unicode, 0,
                                 id));

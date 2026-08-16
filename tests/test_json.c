@@ -231,18 +231,22 @@ TEST(rejects) {
     const char tab[] = {'"', 'a', '\t', 'b', '"', '\0'};
     ASSERT_TRUE(parse_fails(tab));
   }
-  /* invalid UTF-8 byte sequences */
+  /* Invalid UTF-8 byte sequences. Spelled as string literals, not as
+   * {..., (char)0xff, ...}: char is signed under MSVC, so casting a
+   * constant above CHAR_MAX is C4310 — fatal under /W4 /WX. Each \x
+   * escape is followed by a backslash, so none of them swallow the
+   * next character. */
   {
-    const char bad_utf8[] = {'"', (char)0xff, '"', '\0'};
+    const char bad_utf8[] = "\"\xff\"";
     ASSERT_TRUE(parse_fails(bad_utf8));
   }
   {
-    const char trunc_utf8[] = {'"', (char)0xc3, '"', '\0'};
+    const char trunc_utf8[] = "\"\xc3\"";
     ASSERT_TRUE(parse_fails(trunc_utf8));
   }
   {
     /* overlong encoding of '/' */
-    const char overlong[] = {'"', (char)0xc0, (char)0xaf, '"', '\0'};
+    const char overlong[] = "\"\xc0\xaf\"";
     ASSERT_TRUE(parse_fails(overlong));
   }
 }
