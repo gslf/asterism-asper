@@ -73,6 +73,11 @@ asper_free(prompt);
 asper_close(ctx);
 ```
 
+`asper_open` preserves cwd-relative resolution and the original two-pointer
+`asper_open_params` ABI. A host that resolves models relative to its own root
+can use the additive `asper_open_at(&p, engine_root, &ctx)` API without changing
+the public struct.
+
 ## MCP server
 
 ```sh

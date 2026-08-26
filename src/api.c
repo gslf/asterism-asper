@@ -536,10 +536,25 @@ static void ctx_destroy(asper_ctx *c, bool store_opened) {
   free(c);
 }
 
-asper_err asper_open_with(const asper_open_params *p,
-                          const asper_embedder *emb,
-                          const asper_curator_iface *cur,
-                          const asper_clock *clk, asper_ctx **out) {
+/* Join a relative model path onto base (NULL base or an absolute path —
+ * leading '/', or a Windows drive prefix — leaves *slot untouched). */
+static asper_err cfg_base_join(const char *base, char **slot) {
+  char *joined;
+  const char *s = *slot;
+  if (base == NULL || s == NULL || s[0] == '\0' || os_path_is_abs(s))
+    return ASPER_OK;
+  joined = os_path_join(base, s);
+  if (joined == NULL) return ASPER_ERR_NOMEM;
+  free(*slot);
+  *slot = joined;
+  return ASPER_OK;
+}
+
+static asper_err asper_open_impl(const asper_open_params *p,
+                                 const char *base_dir,
+                                 const asper_embedder *emb,
+                                 const asper_curator_iface *cur,
+                                 const asper_clock *clk, asper_ctx **out) {
   asper_ctx *c;
   asper_err e;
   bool store_opened = false;
@@ -565,6 +580,12 @@ asper_err asper_open_with(const asper_open_params *p,
 
   asper_config_defaults(&c->cfg);
   e = asper_config_load(c, &c->cfg, p->config_path);
+  if (e != ASPER_OK) goto fail;
+  /* Relative model paths resolve against the host-provided base dir
+   * (embedding hosts pass their engine root); NULL keeps the legacy
+   * cwd-relative behavior for the standalone CLI. */
+  e = cfg_base_join(base_dir, &c->cfg.curator_model_path);
+  if (e == ASPER_OK) e = cfg_base_join(base_dir, &c->cfg.embed_model_path);
   if (e != ASPER_OK) goto fail;
 
   /* 2. Logging: file sink per config + default stderr WARN+ callback. */
@@ -725,8 +746,20 @@ fail:
   return e;
 }
 
+asper_err asper_open_with(const asper_open_params *p,
+                          const asper_embedder *emb,
+                          const asper_curator_iface *cur,
+                          const asper_clock *clk, asper_ctx **out) {
+  return asper_open_impl(p, NULL, emb, cur, clk, out);
+}
+
 asper_err asper_open(const asper_open_params *p, asper_ctx **out) {
-  return asper_open_with(p, NULL, NULL, NULL, out);
+  return asper_open_impl(p, NULL, NULL, NULL, NULL, out);
+}
+
+asper_err asper_open_at(const asper_open_params *p, const char *base_dir,
+                        asper_ctx **out) {
+  return asper_open_impl(p, base_dir, NULL, NULL, NULL, out);
 }
 
 void asper_close(asper_ctx *c) {
@@ -1314,6 +1347,18 @@ asper_err asper_get_stats(asper_ctx *c, asper_stats *out) {
   out->journal_ops = c->store.journal_ops;
   if (c->store.manifest.last_compaction != 0)
     out->last_compaction_at = c->store.manifest.last_compaction;
+  os_rwlock_rdunlock(&c->lock);
+  return ASPER_OK;
+}
+
+asper_err asper_get_readiness(asper_ctx *c, asper_readiness *out) {
+  if (!c || !out) return ASPER_ERR_INVALID;
+  memset(out, 0, sizeof *out);
+  os_rwlock_rdlock(&c->lock);
+  out->store_ok = c->store.root != NULL;
+  out->embedder_ok = c->has_embedder;
+  out->curator_ok = c->has_curator;
+  out->index_dim = c->index.dim;
   os_rwlock_rdunlock(&c->lock);
   return ASPER_OK;
 }

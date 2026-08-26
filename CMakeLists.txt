@@ -62,6 +62,11 @@ if(NOT TARGET xcdn)
     add_subdirectory(deps/xcdn-c EXCLUDE_FROM_ALL)
   endif()
 endif()
+if(MSVC AND TARGET xcdn)
+  # The hardened xCDN pin uses the POSIX spelling. MSVC's strtok_s has the
+  # same three-argument contract and is the platform implementation here.
+  target_compile_definitions(xcdn PRIVATE strtok_r=strtok_s)
+endif()
 
 # llama.cpp: curator inference + embeddings (consumed via its C API only).
 if(ASPER_WITH_LLAMA)
@@ -73,9 +78,10 @@ if(ASPER_WITH_LLAMA)
   set(LLAMA_BUILD_SERVER   OFF CACHE BOOL "" FORCE)
   set(LLAMA_BUILD_TOOLS    OFF CACHE BOOL "" FORCE)
   set(LLAMA_CURL           OFF CACHE BOOL "" FORCE)
-  if(APPLE)
-    # CPU-only baseline; enable Metal explicitly if desired.
-    set(GGML_METAL OFF CACHE BOOL "" FORCE)
+  if(APPLE AND NOT DEFINED GGML_METAL)
+    # CPU-only baseline; opt into the GPU with -DGGML_METAL=ON (a plain
+    # default, not FORCE, so the explicit request survives this line).
+    set(GGML_METAL OFF CACHE BOOL "Use Metal for llama.cpp")
   endif()
   add_subdirectory(deps/llama.cpp EXCLUDE_FROM_ALL)
 endif()
@@ -140,6 +146,14 @@ add_library(asper_shared SHARED $<TARGET_OBJECTS:asper_obj>)
 set_target_properties(asper_shared PROPERTIES
   OUTPUT_NAME asper
   WINDOWS_EXPORT_ALL_SYMBOLS ON)
+if(WIN32)
+  # The DLL's import library is also named asper.lib and would overwrite
+  # asper_static's archive (last writer wins — consumers then link a
+  # random one). Keep the import library in its own directory; CMake
+  # consumers link by target and never notice.
+  set_target_properties(asper_shared PROPERTIES
+    ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/shared-import)
+endif()
 
 foreach(tgt asper_static asper_shared)
   target_include_directories(${tgt} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)

@@ -319,7 +319,9 @@ asper_err asper_embedder_llama_create(asper_ctx *c, asper_embedder *out)
   os_mutex_init(&u->p_mu);
 
   mparams = llama_model_default_params();
-  mparams.n_gpu_layers = 0;
+  /* -1 = every layer in VRAM (llama.h: negative means all); 0 keeps
+   * the model on the CPU. CPU-only builds ignore the value. */
+  mparams.n_gpu_layers = c->cfg.embed_gpu_layers;
   u->model = llama_model_load_from_file(path, mparams);
   if (u->model == NULL) {
     e = asper_seterr(c, ASPER_ERR_MODEL,
@@ -385,6 +387,16 @@ asper_err asper_embedder_llama_create(asper_ctx *c, asper_embedder *out)
   if (e != ASPER_OK) {
     e = asper_seterr(c, e, "failed to hash embedding model file: %s", path);
     goto fail;
+  }
+  /* Vectors are a product of the weights AND preprocessing.  Store a
+   * pipeline hash in the existing cache/manifest hash field so changing a
+   * model-owned prefix cannot reuse an incompatible index.  Include role
+   * separators because query and passage preprocessing are asymmetric. */
+  {
+    uint8_t weights_hash[32];
+    memcpy(weights_hash, out->model_hash, sizeof weights_hash);
+    asper_embedding_pipeline_hash(weights_hash, u->query_prefix,
+                                  u->passage_prefix, out->model_hash);
   }
 
   out->ud = u;

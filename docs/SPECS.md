@@ -326,7 +326,7 @@ Triggers: journal exceeds `storage.journal_max_ops` (default 2048), or `asper_fl
 
 ### 5.1 Embeddings
 
-A small dedicated embedding model in GGUF format runs through llama.cpp's embedding API, separate from the curator model. Output is mean-pooled and L2-normalized. The model is configurable; the reference default is multilingual-e5-small (384 dimensions, quantized q8_0) for mixed Italian/English usage (D4); the M7 quality harness confirms or amends it. Prefix strings required by some model families (e5: `"query: "` / `"passage: "`) are configuration values (`embedding.query_prefix`, `embedding.passage_prefix`), empty by default.
+A small dedicated embedding model in GGUF format runs through llama.cpp's embedding API, separate from the curator model. Output is mean-pooled and L2-normalized. The model is configurable; the reference default is multilingual-e5-small (384 dimensions, quantized q8_0) for mixed Italian/English usage (D4). Its required `"query: "` / `"passage: "` preprocessing is the default even for non-English text. Prefixes are model properties (`embedding.query_prefix`, `embedding.passage_prefix`) and are included with the weights in the embedding-pipeline hash; changing either invalidates and rebuilds the persisted index.
 
 Records are embedded at insert/update time on the worker thread. Queries are embedded on the calling thread using a dedicated llama context that shares the model weights with the worker's context (llama.cpp supports multiple contexts per loaded model), so the hot path never blocks behind background embedding.
 
@@ -500,7 +500,7 @@ See `include/asper.h` — the header is the authoritative, complete version of t
 
 ## 10. MCP server (asper-mcp)
 
-A thin executable: `asper-mcp --root <dir> [--config <file>]`. Transport is stdio; protocol is JSON-RPC 2.0 implementing the MCP lifecycle (`initialize`, `tools/list`, `tools/call`) against the MCP specification revision pinned at implementation time.
+A thin executable: `asper-mcp --root <dir> [--config <file>]`. Transport is stdio over JSON-RPC 2.0. It supports stateless MCP `2026-07-28` (`server/discover`, per-request protocol `_meta`) and legacy `2025-06-18` (`initialize`/`initialized`); other versions fail with `-32022`.
 
 Tools:
 
@@ -528,7 +528,7 @@ Design constraints:
 
 ## 11. Configuration
 
-All configuration lives in one xCDN file passed to `asper_open` (or `asper-mcp --config`). Precedence: built-in defaults ← `config.xcdn`. Every key is optional; the file below shows the complete key set with the default values used when absent.
+All configuration lives in one xCDN file passed to `asper_open` (or `asper-mcp --config`). `asper_open` preserves cwd-relative resolution and the original two-pointer `asper_open_params` ABI; `asper_open_at(params, base_dir, out)` is the additive host API for resolving model paths against an engine root. Precedence: built-in defaults ← `config.xcdn`. Every key is optional; the file below shows the complete key set with the default values used when absent.
 
 ```
 #asper_config {
@@ -553,8 +553,8 @@ All configuration lives in one xCDN file passed to `asper_open` (or `asper-mcp -
   embedding: {
     model_path: "models/multilingual-e5-small-q8_0.gguf",
     dim: 384,
-    query_prefix: "",  // e.g. "query: " for e5 models          (§5.1)
-    passage_prefix: "",  // e.g. "passage: "
+    query_prefix: "query: ",       // multilingual-e5 default       (§5.1)
+    passage_prefix: "passage: ",   // both participate in pipeline hash
   },
   budgets: {
     identity_tokens: 400,

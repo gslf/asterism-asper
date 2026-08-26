@@ -319,7 +319,9 @@ asper_err asper_curator_llama_create(asper_ctx *c, asper_curator_iface *out)
     return asper_seterr(c, ASPER_ERR_NOMEM, "out of memory");
 
   mparams = llama_model_default_params();
-  mparams.n_gpu_layers = 0;
+  /* -1 = every layer in VRAM (llama.h: negative means all); 0 keeps
+   * the model on the CPU. CPU-only builds ignore the value. */
+  mparams.n_gpu_layers = c->cfg.curator_gpu_layers;
   u->model = llama_model_load_from_file(path, mparams);
   if (u->model == NULL) {
     e = asper_seterr(c, ASPER_ERR_MODEL, "failed to load curator model: %s",

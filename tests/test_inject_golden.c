@@ -26,6 +26,7 @@ static fake_curator g_cur;
 
 static asper_ctx *open_store(const char *root, const char *config) {
   asper_open_params p;
+  memset(&p, 0, sizeof p);
   asper_embedder emb = fake_embedder_make();
   asper_curator_iface ci = fake_curator_iface_make(&g_cur);
   asper_clock ck = fake_clock_make(&g_clk);

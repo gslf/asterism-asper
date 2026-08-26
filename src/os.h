@@ -56,6 +56,7 @@
 #define os_random_bytes       asper_x_random_bytes
 #define os_hardware_threads   asper_x_hardware_threads
 #define os_path_join          asper_x_path_join
+#define os_path_is_abs        asper_x_path_is_abs
 
 
 #ifdef __cplusplus
@@ -155,6 +156,7 @@ int     os_hardware_threads(void);         /* >= 1 */
 /* Path join with '/' (also fine on Windows APIs used here). Returns
  * malloc'd string. */
 char   *os_path_join(const char *a, const char *b);
+int     os_path_is_abs(const char *path);
 
 #ifdef __cplusplus
 }

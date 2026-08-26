@@ -32,6 +32,7 @@
     model_path: "models/qwen2.5-1.5b-instruct-q4_k_m.gguf",  // resolved against the process cwd, not --root
     ctx: 4096,               // context window given to the curator model
     threads: 4,               // CPU threads for curator inference
+    gpu_layers: -1,           // -1 = all, 0 = CPU, N = partial offload
     instruction_path: null,   // override the built-in curator instruction with a text file
   },
 
@@ -39,8 +40,9 @@
   embedding: {
     model_path: "models/multilingual-e5-small-q8_0.gguf",  // resolved against the process cwd, not --root
     dim: 384,                // must match the embedding model's output dimension
-    query_prefix: "",        // e.g. "query: " — some model families (e5) expect this
-    passage_prefix: "",      // e.g. "passage: "
+    gpu_layers: -1,          // -1 = all, 0 = CPU, N = partial offload
+    query_prefix: "query: ",       // required by multilingual-e5, in every language
+    passage_prefix: "passage: ",   // changing either prefix rebuilds the index
   },
 
   // How many tokens each memory section may consume in the assembled prompt.

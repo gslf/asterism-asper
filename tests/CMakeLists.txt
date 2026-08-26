@@ -66,3 +66,28 @@ foreach(test_name IN LISTS ASPER_TEST_PROGRAMS)
 
   add_test(NAME ${test_name} COMMAND ${test_name})
 endforeach()
+
+# Compile this executable against the pre-base_dir declaration, then link and
+# run it against the current shared library. This catches accidental public
+# struct growth that an in-tree header-size assertion alone cannot exercise.
+add_executable(test_abi_legacy test_abi_legacy.c)
+set_target_properties(test_abi_legacy PROPERTIES C_STANDARD 99
+  C_STANDARD_REQUIRED ON C_EXTENSIONS OFF)
+target_compile_options(test_abi_legacy PRIVATE ${ASPER_C_FLAGS})
+target_link_libraries(test_abi_legacy PRIVATE asper_shared)
+if(WIN32)
+  add_custom_command(TARGET test_abi_legacy POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+      "$<TARGET_FILE:asper_shared>" "$<TARGET_FILE_DIR:test_abi_legacy>")
+endif()
+add_test(NAME test_abi_legacy COMMAND test_abi_legacy
+  "${CMAKE_CURRENT_BINARY_DIR}/legacy-abi-root")
+
+if(TARGET asper-mcp)
+  add_test(NAME test_mcp_protocol
+    COMMAND ${CMAKE_COMMAND}
+      "-DMCP_EXE=$<TARGET_FILE:asper-mcp>"
+      "-DMCP_ROOT_FLAG=--root"
+      -P "${CMAKE_CURRENT_SOURCE_DIR}/mcp_smoke.cmake")
+  set_tests_properties(test_mcp_protocol PROPERTIES TIMEOUT 60)
+endif()

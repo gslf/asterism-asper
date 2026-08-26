@@ -60,6 +60,9 @@ static const char OOM_RESPONSE[] =
     "{\"jsonrpc\":\"2.0\",\"id\":null,"
     "\"error\":{\"code\":-32603,\"message\":\"out of memory\"}}";
 
+#define MCP_LEGACY_VERSION "2025-06-18"
+#define MCP_MODERN_VERSION "2026-07-28"
+
 /* ═══════════════════════ small helpers ═══════════════════════ */
 
 static void emit_line(const char *s) {
@@ -819,7 +822,7 @@ static jx_value *initialize_result(void) {
   jx_value *res = jx_object();
   jx_value *caps, *si;
   int ok = (res != NULL);
-  ok &= jx_object_set(res, "protocolVersion", jx_string("2025-06-18")) == 0;
+  ok &= jx_object_set(res, "protocolVersion", jx_string(MCP_LEGACY_VERSION)) == 0;
   caps = jx_object();
   ok &= jx_object_set(caps, "tools", jx_object()) == 0;
   ok &= jx_object_set(res, "capabilities", caps) == 0;
@@ -839,7 +842,8 @@ static jx_value *discover_result(void) {
   jx_value *versions = jx_array();
   jx_value *caps = jx_object();
   int ok = (res != NULL && versions != NULL && caps != NULL);
-  ok &= jx_array_push(versions, jx_string("2026-07-28")) == 0;
+  ok &= jx_array_push(versions, jx_string(MCP_MODERN_VERSION)) == 0;
+  ok &= jx_array_push(versions, jx_string(MCP_LEGACY_VERSION)) == 0;
   ok &= jx_object_set(caps, "tools", jx_object()) == 0;
   ok &= jx_object_set(res, "supportedVersions", versions) == 0;
   ok &= jx_object_set(res, "capabilities", caps) == 0;
@@ -1001,7 +1005,7 @@ static void handle_request(asper_ctx *c, jx_value *req) {
                     : NULL;
     modern = protocolv && jx_typeof(protocolv) == JX_STRING &&
              jx_string_length(protocolv) == 10 &&
-             memcmp(jx_string_value(protocolv), "2026-07-28", 10) == 0;
+              memcmp(jx_string_value(protocolv), MCP_MODERN_VERSION, 10) == 0;
   }
   /* "notifications/..." methods are ignored only as true notifications
    * (no id); an id-carrying request must get a response, so it falls
@@ -1018,6 +1022,15 @@ static void handle_request(asper_ctx *c, jx_value *req) {
     return;
   }
   if (strcmp(method, "initialize") == 0) {
+    const jx_value *params = jx_object_get(req, "params");
+    const jx_value *pv = params && jx_typeof(params) == JX_OBJECT
+                             ? jx_object_get(params, "protocolVersion")
+                             : NULL;
+    if (pv && (jx_typeof(pv) != JX_STRING ||
+               strcmp(jx_string_value(pv), MCP_LEGACY_VERSION) != 0)) {
+      send_error(has_id, rid, -32022, "unsupported MCP protocol version", NULL);
+      return;
+    }
     jx_value *res = initialize_result();
     if (!res) send_error(has_id, rid, -32603, "out of memory", NULL);
     else send_result(has_id, rid, res, 0);

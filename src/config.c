@@ -42,13 +42,18 @@ void asper_config_defaults(asper_config *cfg) {
       asper_strdup("models/qwen2.5-1.5b-instruct-q4_k_m.gguf");
   cfg->curator_ctx = 4096;
   cfg->curator_threads = 4;
+  cfg->curator_gpu_layers = -1; /* all in VRAM when a GPU backend exists */
   cfg->instruction_path = NULL;
 
   /* embedding */
   cfg->embed_model_path = asper_strdup("models/multilingual-e5-small-q8_0.gguf");
   cfg->embed_dim = 384;
-  cfg->query_prefix = asper_strdup("");
-  cfg->passage_prefix = asper_strdup("");
+  cfg->embed_gpu_layers = -1;
+  /* multilingual-e5 is the distributed/default embedder.  Its training
+   * contract requires these prefixes for every language; treating them as
+   * optional silently produces lower-quality, incompatible vectors. */
+  cfg->query_prefix = asper_strdup("query: ");
+  cfg->passage_prefix = asper_strdup("passage: ");
 
   /* budgets */
   cfg->identity_tokens = 400;
@@ -145,6 +150,7 @@ static const enum_map LEVEL_MAP[] = {
 
 typedef enum {
   K_INT,  /* int, must be >= 1                                   */
+  K_GPU,  /* int, must be >= -1 (gpu_layers: -1 = all, 0 = CPU)  */
   K_DUR,  /* r"..." or string ISO-8601 duration -> int64 seconds */
   K_F01,  /* double in [0,1]; INT or FLOAT accepted              */
   K_BOOL, /* bool                                                */
@@ -177,10 +183,12 @@ static const cfg_key CFG_KEYS[] = {
     {"curator", "model_path", K_STR, OFF(curator_model_path), NULL},
     {"curator", "ctx", K_INT, OFF(curator_ctx), NULL},
     {"curator", "threads", K_INT, OFF(curator_threads), NULL},
+    {"curator", "gpu_layers", K_GPU, OFF(curator_gpu_layers), NULL},
     {"curator", "instruction_path", K_NSTR, OFF(instruction_path), NULL},
 
     {"embedding", "model_path", K_STR, OFF(embed_model_path), NULL},
     {"embedding", "dim", K_INT, OFF(embed_dim), NULL},
+    {"embedding", "gpu_layers", K_GPU, OFF(embed_gpu_layers), NULL},
     {"embedding", "query_prefix", K_STR, OFF(query_prefix), NULL},
     {"embedding", "passage_prefix", K_STR, OFF(passage_prefix), NULL},
 
@@ -270,6 +278,17 @@ static asper_err cfg_apply(asper_ctx *c, asper_config *cfg, const cfg_key *k,
       return asper_seterr(c, ASPER_ERR_CONFIG,
                           "config: %s: %lld out of range (must be a positive "
                           "integer)",
+                          path, (long long)iv);
+    *(int *)dst = (int)iv;
+    return ASPER_OK;
+  }
+  case K_GPU: {
+    int64_t iv;
+    if (v->type != XCDN_VAL_INT) return cfg_type_err(c, path, "integer", v);
+    iv = v->data.integer;
+    if (iv < -1 || iv > INT_MAX)
+      return asper_seterr(c, ASPER_ERR_CONFIG,
+                          "config: %s: %lld out of range (must be >= -1)",
                           path, (long long)iv);
     *(int *)dst = (int)iv;
     return ASPER_OK;

@@ -159,3 +159,24 @@ asper_err asper_sha256_file(const char *path, uint8_t out[32]) {
   if (err == ASPER_OK) asper_sha256_final(&ctx, out);
   return err;
 }
+
+void asper_embedding_pipeline_hash(const uint8_t weights_hash[32],
+                                   const char *query_prefix,
+                                   const char *passage_prefix,
+                                   uint8_t out[32]) {
+  static const char domain[] = "asper-embedding-pipeline-v1\0";
+  static const char query_role[] = "query\0";
+  static const char passage_role[] = "passage\0";
+  asper_sha256_ctx hc;
+  if (!weights_hash || !out) return;
+  if (!query_prefix) query_prefix = "";
+  if (!passage_prefix) passage_prefix = "";
+  asper_sha256_init(&hc);
+  asper_sha256_update(&hc, domain, sizeof domain);
+  asper_sha256_update(&hc, weights_hash, 32);
+  asper_sha256_update(&hc, query_role, sizeof query_role);
+  asper_sha256_update(&hc, query_prefix, strlen(query_prefix));
+  asper_sha256_update(&hc, passage_role, sizeof passage_role);
+  asper_sha256_update(&hc, passage_prefix, strlen(passage_prefix));
+  asper_sha256_final(&hc, out);
+}

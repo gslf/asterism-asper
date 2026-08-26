@@ -151,6 +151,19 @@ TEST(uuid_rejects) {
   }
 }
 
+TEST(embedding_pipeline_hash_versions_prefixes) {
+  uint8_t weights[32] = {0};
+  uint8_t a[32], b[32], c[32], again[32];
+  asper_embedding_pipeline_hash(weights, "query: ", "passage: ", a);
+  asper_embedding_pipeline_hash(weights, "query: ", "passage: ", again);
+  asper_embedding_pipeline_hash(weights, "", "passage: ", b);
+  asper_embedding_pipeline_hash(weights, "query: ", "", c);
+  ASSERT_TRUE(memcmp(a, again, 32) == 0);
+  ASSERT_TRUE(memcmp(a, b, 32) != 0);
+  ASSERT_TRUE(memcmp(a, c, 32) != 0);
+  ASSERT_TRUE(memcmp(b, c, 32) != 0);
+}
+
 TEST_LIST = {
     TEST_ENTRY(sha256_nist_vectors),
     TEST_ENTRY(sha256_streaming_chunks),
@@ -159,6 +172,7 @@ TEST_LIST = {
     TEST_ENTRY(uuid_v4_shape_and_uniqueness),
     TEST_ENTRY(uuid_bytes_roundtrip),
     TEST_ENTRY(uuid_rejects),
+    TEST_ENTRY(embedding_pipeline_hash_versions_prefixes),
 };
 
 RUN_ALL_TESTS()

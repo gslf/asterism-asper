@@ -130,6 +130,10 @@ void asper_sha256_update(asper_sha256_ctx *ctx, const void *data, size_t len);
 void asper_sha256_final(asper_sha256_ctx *ctx, uint8_t out[32]);
 void asper_sha256(const void *data, size_t len, uint8_t out[32]);
 asper_err asper_sha256_file(const char *path, uint8_t out[32]);
+void asper_embedding_pipeline_hash(const uint8_t weights_hash[32],
+                                   const char *query_prefix,
+                                   const char *passage_prefix,
+                                   uint8_t out[32]);
 
 /* ═══════════════════════ records ═══════════════════════ */
 
@@ -207,10 +211,12 @@ typedef struct {
   char *curator_model_path;
   int curator_ctx;
   int curator_threads;
+  int curator_gpu_layers;      /* -1 = all in VRAM (default), 0 = CPU */
   char *instruction_path;      /* NULL = built-in default */
   /* embedding */
   char *embed_model_path;
   int embed_dim;
+  int embed_gpu_layers;        /* -1 = all in VRAM (default), 0 = CPU */
   char *query_prefix;          /* "" default */
   char *passage_prefix;
   /* budgets */
@@ -426,6 +432,8 @@ typedef struct {
   void *ud;
   int dim;
   char model_id[128];
+  /* SHA-256 of the complete embedding pipeline (weights plus model-owned
+   * query/passage preprocessing), used to invalidate persisted vectors. */
   uint8_t model_hash[32];
   /* Callable from ANY thread for both kinds; backends serialize
    * internally (separate query/passage contexts so queries never wait on

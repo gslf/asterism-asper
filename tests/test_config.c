@@ -14,6 +14,7 @@ static fake_curator g_cur;
 
 static asper_ctx *open_with_config(const char *root, const char *config) {
   asper_open_params p;
+  memset(&p, 0, sizeof p);
   asper_embedder emb = fake_embedder_make();
   asper_curator_iface ci = fake_curator_iface_make(&g_cur);
   asper_clock ck = fake_clock_make(&g_clk);
@@ -27,6 +28,7 @@ static asper_ctx *open_with_config(const char *root, const char *config) {
 
 static asper_err open_err(const char *root, const char *config) {
   asper_open_params p;
+  memset(&p, 0, sizeof p);
   asper_embedder emb = fake_embedder_make();
   asper_curator_iface ci = fake_curator_iface_make(&g_cur);
   asper_clock ck = fake_clock_make(&g_clk);
@@ -37,6 +39,11 @@ static asper_err open_err(const char *root, const char *config) {
   e = asper_open_with(&p, &emb, &ci, &ck, &c);
   if (e == ASPER_OK) asper_close(c);
   return e;
+}
+
+TEST(open_params_layout_remains_legacy_abi) {
+  ASSERT_EQ_INT((long long)sizeof(asper_open_params),
+                (long long)(2 * sizeof(const char *)));
 }
 
 TEST(defaults_match_spec) {
@@ -57,12 +64,14 @@ TEST(defaults_match_spec) {
                 "models/qwen2.5-1.5b-instruct-q4_k_m.gguf");
   ASSERT_EQ_INT(cfg.curator_ctx, 4096);
   ASSERT_EQ_INT(cfg.curator_threads, 4);
+  ASSERT_EQ_INT(cfg.curator_gpu_layers, -1);
   ASSERT_TRUE(cfg.instruction_path == NULL);
   /* embedding */
   ASSERT_EQ_STR(cfg.embed_model_path, "models/multilingual-e5-small-q8_0.gguf");
   ASSERT_EQ_INT(cfg.embed_dim, 384);
-  ASSERT_EQ_STR(cfg.query_prefix, "");
-  ASSERT_EQ_STR(cfg.passage_prefix, "");
+  ASSERT_EQ_INT(cfg.embed_gpu_layers, -1);
+  ASSERT_EQ_STR(cfg.query_prefix, "query: ");
+  ASSERT_EQ_STR(cfg.passage_prefix, "passage: ");
   /* budgets */
   ASSERT_EQ_INT(cfg.identity_tokens, 400);
   ASSERT_EQ_INT(cfg.context_tokens, 600);
@@ -110,9 +119,9 @@ static const char FULL_OVERLAY[] =
     "  logging: { path: null, level: \"debug\", max_size_kb: 64,"
     " max_files: 2, sync: true },\n"
     "  curator: { model_path: \"custom/curator.gguf\", ctx: 2048,"
-    " threads: 2, instruction_path: null },\n"
+    " threads: 2, gpu_layers: 7, instruction_path: null },\n"
     "  embedding: { model_path: \"custom/embed.gguf\", dim: 16,"
-    " query_prefix: \"query: \", passage_prefix: \"passage: \" },\n"
+    " gpu_layers: 0, query_prefix: \"query: \", passage_prefix: \"passage: \" },\n"
     "  budgets: { identity_tokens: 100, context_tokens: 200,"
     " project_tokens: 300 },\n"
     "  injection: { token_estimator: \"heuristic\", template_path: null },\n"
@@ -150,9 +159,11 @@ TEST(overlay_every_key_type) {
   ASSERT_EQ_STR(c->cfg.curator_model_path, "custom/curator.gguf"); /* str */
   ASSERT_EQ_INT(c->cfg.curator_ctx, 2048);
   ASSERT_EQ_INT(c->cfg.curator_threads, 2);
+  ASSERT_EQ_INT(c->cfg.curator_gpu_layers, 7);
   ASSERT_TRUE(c->cfg.instruction_path == NULL);
   ASSERT_EQ_STR(c->cfg.embed_model_path, "custom/embed.gguf");
   ASSERT_EQ_INT(c->cfg.embed_dim, 16);
+  ASSERT_EQ_INT(c->cfg.embed_gpu_layers, 0);
   ASSERT_EQ_STR(c->cfg.query_prefix, "query: ");
   ASSERT_EQ_STR(c->cfg.passage_prefix, "passage: ");
   ASSERT_EQ_INT(c->cfg.identity_tokens, 100);
@@ -304,6 +315,7 @@ TEST(missing_config_path_is_error) {
 }
 
 TEST_LIST = {
+    TEST_ENTRY(open_params_layout_remains_legacy_abi),
     TEST_ENTRY(defaults_match_spec),
     TEST_ENTRY(overlay_every_key_type),
     TEST_ENTRY(partial_overlay_keeps_defaults),

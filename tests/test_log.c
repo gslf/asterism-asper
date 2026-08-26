@@ -17,6 +17,7 @@ static asper_ctx *open_with_log(const char *root, const char *level,
   char cfg_path[512];
   char cfg_text[1024];
   asper_open_params p;
+  memset(&p, 0, sizeof p);
   asper_embedder emb = fake_embedder_make();
   asper_curator_iface ci = fake_curator_iface_make(&g_cur);
   asper_clock ck = fake_clock_make(&g_clk);
@@ -140,6 +141,7 @@ static void log_cb(int level, const char *msg, void *userdata) {
 TEST(callback_receives_records) {
   char root[256];
   asper_open_params p;
+  memset(&p, 0, sizeof p);
   asper_embedder emb = fake_embedder_make();
   asper_curator_iface ci;
   asper_clock ck;

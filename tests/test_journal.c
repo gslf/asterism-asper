@@ -16,6 +16,7 @@ static fake_curator g_cur;
 
 static asper_ctx *open_store(const char *root) {
   asper_open_params p;
+  memset(&p, 0, sizeof p);
   asper_embedder emb = fake_embedder_make();
   asper_curator_iface ci = fake_curator_iface_make(&g_cur);
   asper_clock ck = fake_clock_make(&g_clk);
@@ -233,6 +234,7 @@ TEST(midfile_corruption_fails_open) {
   size_t jlen = 0, jlines = 0;
   asper_buf buf;
   asper_open_params p;
+  memset(&p, 0, sizeof p);
   asper_embedder emb = fake_embedder_make();
   asper_curator_iface ci;
   asper_clock ck;

@@ -79,6 +79,10 @@ typedef struct {
 } asper_open_params;
 
 asper_err   asper_open(const asper_open_params *p, asper_ctx **out);
+/* Like asper_open, but relative curator/embedding model paths resolve
+ * against base_dir. NULL preserves asper_open's cwd-relative behavior. */
+asper_err   asper_open_at(const asper_open_params *p, const char *base_dir,
+                          asper_ctx **out);
 /* Flush, compact, join worker, release everything. NULL is a no-op. */
 void        asper_close(asper_ctx *c);
 /* UTF-8 message for the most recent error on this context; ctx-owned. */
@@ -176,6 +180,14 @@ typedef struct {
   long long last_compaction_at; /* unix seconds UTC; 0 = never */
 } asper_stats;
 asper_err asper_get_stats(asper_ctx *c, asper_stats *out);
+
+typedef struct {
+  int store_ok;
+  int embedder_ok;
+  int curator_ok;
+  int index_dim;
+} asper_readiness;
+asper_err asper_get_readiness(asper_ctx *c, asper_readiness *out);
 
 /* Callback sink, independent of the file log. level: ASPER_LOG_*. The
  * callback may be invoked concurrently and may re-enter libasper; userdata
