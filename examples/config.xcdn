@@ -1,4 +1,4 @@
-// config.xcdn — standard configuration reference for Asper.
+// examples/config.xcdn — standard configuration reference for Asper.
 //
 // Every key below is optional and shown at its built-in default: an empty
 // file (or omitting --config entirely) behaves identically to this one.
@@ -27,9 +27,24 @@
     sync: false,          // fsync after every log line (off = faster, less durable)
   },
 
+  // Process-wide inference residency. 0 means unlimited for byte budgets.
+  models: {
+    max_resident: 2,
+    max_ram_mb: 0,
+    max_vram_mb: 0,
+  },
+
   // The curator model: decides what to remember, update, or forget.
   curator: {
+    backend: "embedded",       // "embedded" | "openai"
     model_path: "models/qwen2.5-1.5b-instruct-q4_k_m.gguf",  // resolved against the process cwd, not --root
+    base_url: null,            // e.g. "http://127.0.0.1:1234/v1"
+    remote_model: "qwen2.5-1.5b-instruct",
+    api_key_env: null,         // environment variable name, never the secret
+    api_grammar: "none",       // "none" | "llama" | "vllm"
+    ram_mb: 0,                 // 0 = estimate embedded weights / zero for API
+    vram_mb: 0,                // declared cost used by the manager
+    kv_cache: true,            // reuse the longest common prompt prefix
     ctx: 4096,               // context window given to the curator model
     threads: 4,               // CPU threads for curator inference
     gpu_layers: -1,           // -1 = all, 0 = CPU, N = partial offload
@@ -38,7 +53,13 @@
 
   // The embedding model: turns memory content and queries into vectors for retrieval.
   embedding: {
+    backend: "embedded",       // "embedded" | "openai"
     model_path: "models/multilingual-e5-small-q8_0.gguf",  // resolved against the process cwd, not --root
+    base_url: null,
+    remote_model: "multilingual-e5-small",
+    api_key_env: null,
+    ram_mb: 0,
+    vram_mb: 0,
     dim: 384,                // must match the embedding model's output dimension
     gpu_layers: -1,          // -1 = all, 0 = CPU, N = partial offload
     query_prefix: "query: ",       // required by multilingual-e5, in every language

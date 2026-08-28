@@ -35,6 +35,7 @@ extern "C" {
 const char *asper_version(void);
 
 typedef struct asper_ctx asper_ctx;
+struct asmodel_manager;
 
 typedef enum {
   ASPER_OK = 0,
@@ -83,6 +84,19 @@ asper_err   asper_open(const asper_open_params *p, asper_ctx **out);
  * against base_dir. NULL preserves asper_open's cwd-relative behavior. */
 asper_err   asper_open_at(const asper_open_params *p, const char *base_dir,
                           asper_ctx **out);
+typedef struct {
+  struct asmodel_manager *manager;
+  const char *curator_model_id;
+  const char *embedding_model_id;
+  int embedding_dim;
+  unsigned char embedding_model_hash[32];
+} asper_model_binding;
+
+/* Borrow a process-wide model manager. The manager must outlive ctx. */
+asper_err asper_open_at_with_models(const asper_open_params *p,
+                                    const char *base_dir,
+                                    const asper_model_binding *models,
+                                    asper_ctx **out);
 /* Flush, compact, join worker, release everything. NULL is a no-op. */
 void        asper_close(asper_ctx *c);
 /* UTF-8 message for the most recent error on this context; ctx-owned. */

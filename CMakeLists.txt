@@ -8,6 +8,9 @@ option(ASPER_NO_THREADS  "Single-threaded build (asper_tick)"    OFF)
 option(ASPER_SANITIZERS  "Enable ASan/UBSan"                     OFF)
 option(ASPER_WITH_LLAMA  "Build llama.cpp backends"              ON)
 
+set(ASPER_ASMODEL_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../asterism-asmodel"
+    CACHE PATH "Path to the asterism-asmodel working tree")
+
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 if(NOT CMAKE_BUILD_TYPE)
@@ -50,6 +53,13 @@ if(ASPER_SANITIZERS AND NOT MSVC)
 endif()
 
 # ── Dependencies ─────────────────────────────────────────────────────────────
+if(NOT TARGET asmodel_static)
+  if(NOT EXISTS "${ASPER_ASMODEL_DIR}/CMakeLists.txt")
+    message(FATAL_ERROR "asterism-asmodel missing — set ASPER_ASMODEL_DIR")
+  endif()
+  set(ASMODEL_BUILD_TESTS OFF)
+  add_subdirectory("${ASPER_ASMODEL_DIR}" deps-build/asmodel EXCLUDE_FROM_ALL)
+endif()
 # xCDN-C: official parser/serializer for all persistent text. With
 # tests enabled its own test/example targets build too (its add_test entries
 # are registered either way, so they must be buildable to run).
@@ -73,6 +83,10 @@ if(ASPER_WITH_LLAMA)
   if(NOT EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/deps/llama.cpp/CMakeLists.txt)
     message(FATAL_ERROR "deps/llama.cpp missing — run: git submodule update --init")
   endif()
+  # The guard shim (src/llama_guard.cpp) is C++: it is the only place a C++
+  # exception escaping llama.cpp's C API can be caught before it unwinds
+  # into C callers and terminates the process.
+  enable_language(CXX)
   set(LLAMA_BUILD_TESTS    OFF CACHE BOOL "" FORCE)
   set(LLAMA_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
   set(LLAMA_BUILD_SERVER   OFF CACHE BOOL "" FORCE)
@@ -108,8 +122,19 @@ set(ASPER_SOURCES
   src/api.c
   src/embed_llama.c
   src/curator_llama.c
+  src/models.c
   src/os_common.c
 )
+if(ASPER_WITH_LLAMA)
+  list(APPEND ASPER_SOURCES src/llama_guard.cpp)
+  if (MSVC)
+    # /EHs, not the default /EHsc: the guard exists to catch C++ exceptions
+    # arriving through the extern "C" llama API. Under /EHsc MSVC assumes
+    # extern "C" callees never throw and elides exactly those catch
+    # handlers, turning every such exception into a silent fail-fast.
+    set_source_files_properties(src/llama_guard.cpp PROPERTIES COMPILE_OPTIONS "/EHs")
+  endif()
+endif()
 if(WIN32)
   list(APPEND ASPER_SOURCES src/os_win32.c)
 else()
@@ -126,7 +151,7 @@ set_target_properties(asper_obj PROPERTIES
   C_EXTENSIONS OFF)
 target_compile_options(asper_obj PRIVATE ${ASPER_C_FLAGS})
 target_compile_definitions(asper_obj PRIVATE ${ASPER_C_DEFS})
-target_link_libraries(asper_obj PUBLIC xcdn)
+target_link_libraries(asper_obj PUBLIC xcdn asmodel_static)
 if(ASPER_NO_THREADS)
   target_compile_definitions(asper_obj PUBLIC ASPER_NO_THREADS)
 endif()
@@ -157,7 +182,7 @@ endif()
 
 foreach(tgt asper_static asper_shared)
   target_include_directories(${tgt} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
-  target_link_libraries(${tgt} PUBLIC xcdn)
+  target_link_libraries(${tgt} PUBLIC xcdn asmodel_static)
   if(ASPER_NO_THREADS)
     target_compile_definitions(${tgt} PUBLIC ASPER_NO_THREADS)
   endif()

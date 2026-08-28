@@ -511,6 +511,7 @@ static void ctx_destroy(asper_ctx *c, bool store_opened) {
     c->embedder.destroy(c->embedder.ud);
   if (c->has_curator && c->curator.destroy)
     c->curator.destroy(c->curator.ud);
+  asper_models_shutdown(c);
   asper_index_free(&c->index);
   if (store_opened) {
     asper_store_close(c);
@@ -552,6 +553,7 @@ static asper_err cfg_base_join(const char *base, char **slot) {
 
 static asper_err asper_open_impl(const asper_open_params *p,
                                  const char *base_dir,
+                                 const asper_model_binding *models,
                                  const asper_embedder *emb,
                                  const asper_curator_iface *cur,
                                  const asper_clock *clk, asper_ctx **out) {
@@ -559,6 +561,9 @@ static asper_err asper_open_impl(const asper_open_params *p,
   asper_err e;
   bool store_opened = false;
   int dim;
+  asper_embedder managed_emb;
+  asper_curator_iface managed_cur;
+  bool managed_attempted = false;
 
   if (!out) return ASPER_ERR_INVALID;
   *out = NULL;
@@ -607,12 +612,22 @@ static asper_err asper_open_impl(const asper_open_params *p,
   if (e != ASPER_OK) goto fail;
   store_opened = true;
 
+  memset(&managed_emb, 0, sizeof managed_emb);
+  memset(&managed_cur, 0, sizeof managed_cur);
+  if (!emb && !cur) {
+    managed_attempted = true;
+    e = asper_models_bind(c, models, &managed_emb, &managed_cur);
+    if (e != ASPER_OK) goto fail;
+    emb = managed_emb.embed ? &managed_emb : NULL;
+    cur = managed_cur.generate ? &managed_cur : NULL;
+  }
+
   /* 5. Backends: provided vtables win; else llama when available. Missing
    * models never fail the open — the context runs degraded with a WARN. */
   if (emb) {
     c->embedder = *emb;
     c->has_embedder = true;
-  } else {
+  } else if (!managed_attempted) {
     asper_embedder eb;
     asper_err be;
     memset(&eb, 0, sizeof eb);
@@ -636,7 +651,7 @@ static asper_err asper_open_impl(const asper_open_params *p,
   if (cur) {
     c->curator = *cur;
     c->has_curator = true;
-  } else {
+  } else if (!managed_attempted) {
     asper_curator_iface ci;
     asper_err ce;
     memset(&ci, 0, sizeof ci);
@@ -750,16 +765,24 @@ asper_err asper_open_with(const asper_open_params *p,
                           const asper_embedder *emb,
                           const asper_curator_iface *cur,
                           const asper_clock *clk, asper_ctx **out) {
-  return asper_open_impl(p, NULL, emb, cur, clk, out);
+  return asper_open_impl(p, NULL, NULL, emb, cur, clk, out);
 }
 
 asper_err asper_open(const asper_open_params *p, asper_ctx **out) {
-  return asper_open_impl(p, NULL, NULL, NULL, NULL, out);
+  return asper_open_impl(p, NULL, NULL, NULL, NULL, NULL, out);
 }
 
 asper_err asper_open_at(const asper_open_params *p, const char *base_dir,
                         asper_ctx **out) {
-  return asper_open_impl(p, base_dir, NULL, NULL, NULL, out);
+  return asper_open_impl(p, base_dir, NULL, NULL, NULL, NULL, out);
+}
+
+asper_err asper_open_at_with_models(const asper_open_params *p,
+                                    const char *base_dir,
+                                    const asper_model_binding *models,
+                                    asper_ctx **out) {
+  if (!models || !models->manager) return ASPER_ERR_INVALID;
+  return asper_open_impl(p, base_dir, models, NULL, NULL, NULL, out);
 }
 
 void asper_close(asper_ctx *c) {

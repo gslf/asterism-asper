@@ -44,6 +44,7 @@
 #include <stdio.h>
 
 #include "asper.h"
+#include "asmodel.h"
 #include "os.h"
 
 #ifdef __cplusplus
@@ -212,11 +213,20 @@ typedef struct {
   int curator_ctx;
   int curator_threads;
   int curator_gpu_layers;      /* -1 = all in VRAM (default), 0 = CPU */
+  int curator_backend;
+  char *curator_base_url, *curator_remote_model, *curator_api_key_env;
+  char *curator_api_grammar;
+  int curator_ram_mb, curator_vram_mb;
+  bool curator_kv_cache;
   char *instruction_path;      /* NULL = built-in default */
   /* embedding */
   char *embed_model_path;
   int embed_dim;
   int embed_gpu_layers;        /* -1 = all in VRAM (default), 0 = CPU */
+  int embed_backend;
+  char *embed_base_url, *embed_remote_model, *embed_api_key_env;
+  int embed_ram_mb, embed_vram_mb;
+  int models_max_resident, models_max_ram_mb, models_max_vram_mb;
   char *query_prefix;          /* "" default */
   char *passage_prefix;
   /* budgets */
@@ -463,6 +473,11 @@ typedef struct {
  * ASPER_WITH_LLAMA both return ASPER_ERR_MODEL ("built without llama"). */
 asper_err asper_embedder_llama_create(asper_ctx *c, asper_embedder *out);
 asper_err asper_curator_llama_create(asper_ctx *c, asper_curator_iface *out);
+asper_err asper_models_bind(asper_ctx *c,
+                            const asper_model_binding *binding,
+                            asper_embedder *out_embedder,
+                            asper_curator_iface *out_curator);
+void asper_models_shutdown(asper_ctx *c);
 
 /* ═══════════════════════ retrieve.c ═══════════════════════ */
 
@@ -648,6 +663,8 @@ struct asper_ctx {
 
   asper_embedder embedder;      bool has_embedder;
   asper_curator_iface curator;  bool has_curator;
+  asmodel_manager *model_manager;
+  bool owns_model_manager;
 
   char *active_project;         /* owned, NULL = none */
 

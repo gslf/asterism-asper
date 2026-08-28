@@ -4,7 +4,7 @@ An identitarian memory system for LLMs.
 
 Asper is a local, self-curated long-term memory subsystem for language models, with a specific focus on the smaller ones. It gives a host model  a durable sense of **who it is** (identity), **who it is talking to** (context), and **what it is working on** (projects), by maintaining a retrieval-augmented memory that is written, reorganized and pruned autonomously by a second, micro local *curator* model.
 
-Identity is the always-present first layer. The store is plain [xCDN](https://github.com/gslf/xCDN), so it's easy to inspect and edit. Curator inference and embeddings run in-process via llama.cpp, on a worker thread.
+Identity is the always-present first layer. The store is plain [xCDN](https://github.com/gslf/xCDN), so it's easy to inspect and edit. Curator inference and embeddings run in-process via llama.cpp, on a worker thread. They are owned by the shared `asmodel` runtime: standalone Asper creates its own manager, while an embedding host can lend a process-wide manager through `asper_open_at_with_models`.
 
 Full specification: [docs/SPECS.md](docs/SPECS.md).
 
@@ -28,6 +28,14 @@ ctest --test-dir build --output-on-failure
 
 CMake options: `ASPER_BUILD_MCP` (ON), `ASPER_BUILD_TESTS` (ON), `ASPER_NO_THREADS` (OFF), `ASPER_SANITIZERS` (OFF), `ASPER_WITH_LLAMA` (ON — set OFF for a fast, inference-less build, the full test suite passes either way).
 
+**Upstream llama.cpp compatibility.** The pinned `deps/llama.cpp`
+submodule is built unmodified: Asper does not apply or require a custom
+fork. Calls that model-controlled data reaches go through the small C++
+adapter in `src/llama_guard.cpp`; exceptions are converted into the error
+returns the C callers already handle. Its grammar sampler adapter also
+contains malformed grammar state at the public sampler boundary and ends
+generation cleanly, without changing llama.cpp sources.
+
 
 ## Configuration
 
@@ -41,7 +49,7 @@ asper-mcp --root ./memory --config config.xcdn
 asper_open_params p = { .memory_root = "./memory", .config_path = "config.xcdn" };
 ```
 
-Every key is optional and already has a sensible default, so you only need to write the ones you want to change; unknown keys are ignored with a warning, wrong types fail `asper_open` with `ASPER_ERR_CONFIG`. A fully-documented copy with every key spelled out at its default value ships at [config.xcdn](config.xcdn) in this repo — copy it and trim it down to what you actually want to override.
+Every key is optional and already has a sensible default, so you only need to write the ones you want to change; unknown keys are ignored with a warning, wrong types fail `asper_open` with `ASPER_ERR_CONFIG`. A fully-documented copy with every key spelled out at its default value ships at [examples/config.xcdn](examples/config.xcdn) in this repo — copy it and trim it down to what you actually want to override.
 
 ### Models
 
@@ -53,6 +61,33 @@ file at all, the defaults are:
 - Embeddings: `models/multilingual-e5-small-q8_0.gguf`
 
 When a model file is missing, `asper_open` logs a warning and continues in degraded mode (identity injection still works; retrieval/curation/recall are disabled until models are available).
+
+Both roles can instead use an OpenAI-compatible API (LM Studio, vLLM,
+Unsloth Studio, or another compatible server):
+
+```xcdn
+#asper_config {
+  models: { max_resident: 2, max_ram_mb: 12000, max_vram_mb: 8000 },
+  curator: {
+    backend: "openai",
+    base_url: "http://127.0.0.1:1234/v1",
+    remote_model: "qwen2.5-1.5b-instruct",
+    api_key_env: "LOCAL_LLM_API_KEY",
+    api_grammar: "llama",
+  },
+  embedding: {
+    backend: "openai",
+    base_url: "http://127.0.0.1:1234/v1",
+    remote_model: "text-embedding-nomic-embed-text-v1.5",
+    dim: 768,
+  },
+}
+```
+
+`api_key_env` names an environment variable; credentials are never stored
+in the xCDN file. Use `api_grammar: "llama"` for llama.cpp/LM Studio style
+grammar support, `"vllm"` for structured outputs, or `"none"` for
+servers that only implement the OpenAI core.
 
 ## Quick start (C API)
 

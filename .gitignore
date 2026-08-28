@@ -59,3 +59,9 @@ build/
 build-*/
 .cache/
 compile_commands.json
+
+# Local runtime state
+/memory/
+/models/
+/telemetry/
+*.log

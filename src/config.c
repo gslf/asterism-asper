@@ -43,12 +43,19 @@ void asper_config_defaults(asper_config *cfg) {
   cfg->curator_ctx = 4096;
   cfg->curator_threads = 4;
   cfg->curator_gpu_layers = -1; /* all in VRAM when a GPU backend exists */
+  cfg->curator_backend = ASMODEL_BACKEND_EMBEDDED;
+  cfg->curator_remote_model = asper_strdup("qwen2.5-1.5b-instruct");
+  cfg->curator_api_grammar = asper_strdup("none");
+  cfg->curator_kv_cache = true;
   cfg->instruction_path = NULL;
 
   /* embedding */
   cfg->embed_model_path = asper_strdup("models/multilingual-e5-small-q8_0.gguf");
   cfg->embed_dim = 384;
   cfg->embed_gpu_layers = -1;
+  cfg->embed_backend = ASMODEL_BACKEND_EMBEDDED;
+  cfg->embed_remote_model = asper_strdup("multilingual-e5-small");
+  cfg->models_max_resident = 2;
   /* multilingual-e5 is the distributed/default embedder.  Its training
    * contract requires these prefixes for every language; treating them as
    * optional silently produces lower-quality, incompatible vectors. */
@@ -106,8 +113,15 @@ void asper_config_free(asper_config *cfg) {
   if (!cfg) return;
   free(cfg->log_path);
   free(cfg->curator_model_path);
+  free(cfg->curator_base_url);
+  free(cfg->curator_remote_model);
+  free(cfg->curator_api_key_env);
+  free(cfg->curator_api_grammar);
   free(cfg->instruction_path);
   free(cfg->embed_model_path);
+  free(cfg->embed_base_url);
+  free(cfg->embed_remote_model);
+  free(cfg->embed_api_key_env);
   free(cfg->query_prefix);
   free(cfg->passage_prefix);
   free(cfg->template_path);
@@ -148,8 +162,15 @@ static const enum_map LEVEL_MAP[] = {
     {NULL, 0},
 };
 
+static const enum_map BACKEND_MAP[] = {
+    {"embedded", ASMODEL_BACKEND_EMBEDDED},
+    {"openai", ASMODEL_BACKEND_OPENAI},
+    {NULL, 0},
+};
+
 typedef enum {
   K_INT,  /* int, must be >= 1                                   */
+  K_NNI,  /* int, must be >= 0                                   */
   K_GPU,  /* int, must be >= -1 (gpu_layers: -1 = all, 0 = CPU)  */
   K_DUR,  /* r"..." or string ISO-8601 duration -> int64 seconds */
   K_F01,  /* double in [0,1]; INT or FLOAT accepted              */
@@ -180,15 +201,33 @@ static const cfg_key CFG_KEYS[] = {
     {"logging", "max_files", K_INT, OFF(log_max_files), NULL},
     {"logging", "sync", K_BOOL, OFF(log_sync), NULL},
 
+    {"models", "max_resident", K_INT, OFF(models_max_resident), NULL},
+    {"models", "max_ram_mb", K_NNI, OFF(models_max_ram_mb), NULL},
+    {"models", "max_vram_mb", K_NNI, OFF(models_max_vram_mb), NULL},
+
+    {"curator", "backend", K_ENUM, OFF(curator_backend), BACKEND_MAP},
     {"curator", "model_path", K_STR, OFF(curator_model_path), NULL},
     {"curator", "ctx", K_INT, OFF(curator_ctx), NULL},
     {"curator", "threads", K_INT, OFF(curator_threads), NULL},
     {"curator", "gpu_layers", K_GPU, OFF(curator_gpu_layers), NULL},
+    {"curator", "base_url", K_NSTR, OFF(curator_base_url), NULL},
+    {"curator", "remote_model", K_STR, OFF(curator_remote_model), NULL},
+    {"curator", "api_key_env", K_NSTR, OFF(curator_api_key_env), NULL},
+    {"curator", "api_grammar", K_STR, OFF(curator_api_grammar), NULL},
+    {"curator", "ram_mb", K_NNI, OFF(curator_ram_mb), NULL},
+    {"curator", "vram_mb", K_NNI, OFF(curator_vram_mb), NULL},
+    {"curator", "kv_cache", K_BOOL, OFF(curator_kv_cache), NULL},
     {"curator", "instruction_path", K_NSTR, OFF(instruction_path), NULL},
 
+    {"embedding", "backend", K_ENUM, OFF(embed_backend), BACKEND_MAP},
     {"embedding", "model_path", K_STR, OFF(embed_model_path), NULL},
     {"embedding", "dim", K_INT, OFF(embed_dim), NULL},
     {"embedding", "gpu_layers", K_GPU, OFF(embed_gpu_layers), NULL},
+    {"embedding", "base_url", K_NSTR, OFF(embed_base_url), NULL},
+    {"embedding", "remote_model", K_STR, OFF(embed_remote_model), NULL},
+    {"embedding", "api_key_env", K_NSTR, OFF(embed_api_key_env), NULL},
+    {"embedding", "ram_mb", K_NNI, OFF(embed_ram_mb), NULL},
+    {"embedding", "vram_mb", K_NNI, OFF(embed_vram_mb), NULL},
     {"embedding", "query_prefix", K_STR, OFF(query_prefix), NULL},
     {"embedding", "passage_prefix", K_STR, OFF(passage_prefix), NULL},
 
@@ -278,6 +317,17 @@ static asper_err cfg_apply(asper_ctx *c, asper_config *cfg, const cfg_key *k,
       return asper_seterr(c, ASPER_ERR_CONFIG,
                           "config: %s: %lld out of range (must be a positive "
                           "integer)",
+                          path, (long long)iv);
+    *(int *)dst = (int)iv;
+    return ASPER_OK;
+  }
+  case K_NNI: {
+    int64_t iv;
+    if (v->type != XCDN_VAL_INT) return cfg_type_err(c, path, "integer", v);
+    iv = v->data.integer;
+    if (iv < 0 || iv > INT_MAX)
+      return asper_seterr(c, ASPER_ERR_CONFIG,
+                          "config: %s: %lld out of range (must be >= 0)",
                           path, (long long)iv);
     *(int *)dst = (int)iv;
     return ASPER_OK;
@@ -373,6 +423,8 @@ static asper_err cfg_apply(asper_ctx *c, asper_config *cfg, const cfg_key *k,
  * verify its owned strings here, on the load path every open takes. */
 static asper_err cfg_check_defaults(asper_ctx *c, const asper_config *cfg) {
   if (!cfg->curator_model_path || !cfg->embed_model_path ||
+      !cfg->curator_remote_model || !cfg->curator_api_grammar ||
+      !cfg->embed_remote_model ||
       !cfg->query_prefix || !cfg->passage_prefix)
     return asper_seterr(c, ASPER_ERR_NOMEM,
                         "config: out of memory building defaults");
@@ -460,6 +512,21 @@ asper_err asper_config_load(asper_ctx *c, asper_config *cfg,
       e = cfg_apply(c, cfg, k, knode->value);
       if (e != ASPER_OK) goto done;
     }
+  }
+  if ((cfg->curator_backend == ASMODEL_BACKEND_OPENAI &&
+       (!cfg->curator_base_url || !cfg->curator_base_url[0])) ||
+      (cfg->embed_backend == ASMODEL_BACKEND_OPENAI &&
+       (!cfg->embed_base_url || !cfg->embed_base_url[0]))) {
+    e = asper_seterr(c, ASPER_ERR_CONFIG,
+                     "config: OpenAI backend requires base_url");
+    goto done;
+  }
+  if (strcmp(cfg->curator_api_grammar, "none") != 0 &&
+      strcmp(cfg->curator_api_grammar, "llama") != 0 &&
+      strcmp(cfg->curator_api_grammar, "vllm") != 0) {
+    e = asper_seterr(c, ASPER_ERR_CONFIG,
+                     "config: curator.api_grammar must be none, llama or vllm");
+    goto done;
   }
   e = ASPER_OK;
 

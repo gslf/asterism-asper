@@ -27,13 +27,20 @@
 #elif defined(__GNUC__)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wpedantic"
+#elif defined(_MSC_VER)
+#pragma warning(push)
+#pragma warning(disable : 4201) /* nameless struct/union */
 #endif
 #include "llama.h"
 #if defined(__clang__)
 #pragma clang diagnostic pop
 #elif defined(__GNUC__)
 #pragma GCC diagnostic pop
+#elif defined(_MSC_VER)
+#pragma warning(pop)
 #endif
+
+#include "llama_guard.h"
 
 /* Process-wide llama bootstrap, defined in embed_llama.c. */
 void asper_llama_backend_init(void);
@@ -47,6 +54,9 @@ typedef struct {
   const char *chat_template;  /* model-owned; NULL = chatml fallback */
   int n_ctx;
   int n_batch;
+  bool kv_cache;
+  llama_token *cached_prompt;
+  int32_t cached_prompt_n;
 } cll_ud;
 
 /* Tokenize text into a malloc'd array using the negative-return resize
@@ -64,7 +74,8 @@ static asper_err cll_tokenize(const struct llama_vocab *vocab,
   if (strlen(text) > (size_t)INT32_MAX)
     return ASPER_ERR_INVALID;
   len = (int32_t)strlen(text);
-  n = llama_tokenize(vocab, text, len, NULL, 0, add_special, parse_special);
+  n = asper_llg_tokenize(vocab, text, len, NULL, 0, add_special,
+                         parse_special);
   if (n == INT32_MIN)
     return ASPER_ERR_MODEL;
   if (n < 0)
@@ -74,7 +85,8 @@ static asper_err cll_tokenize(const struct llama_vocab *vocab,
   tok = (llama_token *)malloc((size_t)n * sizeof *tok);
   if (tok == NULL)
     return ASPER_ERR_NOMEM;
-  got = llama_tokenize(vocab, text, len, tok, n, add_special, parse_special);
+  got = asper_llg_tokenize(vocab, text, len, tok, n, add_special,
+                           parse_special);
   if (got < 0) {
     free(tok);
     return ASPER_ERR_MODEL;
@@ -127,18 +139,18 @@ static asper_err cll_apply_template(const char *tmpl,
   msgs[1].role = "user";
   msgs[1].content = user_prompt;
 
-  need = llama_chat_apply_template(tmpl, msgs, 2, true, NULL, 0);
+  need = asper_llg_chat_apply_template(tmpl, msgs, 2, true, NULL, 0);
   if (need < 0 && tmpl != NULL) {
     tmpl = NULL; /* chatml fallback */
-    need = llama_chat_apply_template(tmpl, msgs, 2, true, NULL, 0);
+    need = asper_llg_chat_apply_template(tmpl, msgs, 2, true, NULL, 0);
   }
   if (need < 0)
     return ASPER_ERR_MODEL;
   buf = (char *)malloc((size_t)need + 1);
   if (buf == NULL)
     return ASPER_ERR_NOMEM;
-  got = llama_chat_apply_template(tmpl, msgs, 2, true, buf,
-                                  (int32_t)(need + 1));
+  got = asper_llg_chat_apply_template(tmpl, msgs, 2, true, buf,
+                                      (int32_t)(need + 1));
   if (got < 0 || got > need) {
     free(buf);
     return ASPER_ERR_MODEL;
@@ -157,6 +169,7 @@ static asper_err cll_generate(void *ud, const char *system_prompt,
   char *prompt = NULL;
   llama_token *tok = NULL;
   int32_t n_tok = 0;
+  int32_t prompt_start = 0;
   struct llama_sampler *chain = NULL;
   struct llama_sampler *greedy;
   asper_buf outbuf;
@@ -186,7 +199,19 @@ static asper_err cll_generate(void *ud, const char *system_prompt,
     goto out;
   }
 
-  llama_memory_clear(llama_get_memory(u->lctx), true);
+  if (u->kv_cache && u->cached_prompt && u->cached_prompt_n > 0) {
+    int32_t common = 0;
+    while (common < n_tok && common < u->cached_prompt_n &&
+           tok[common] == u->cached_prompt[common]) common++;
+    if (common >= n_tok) common = n_tok - 1;
+    if (common > 0 &&
+        llama_memory_seq_rm(llama_get_memory(u->lctx), -1, common, -1))
+      prompt_start = common;
+    else
+      asper_llg_memory_clear(llama_get_memory(u->lctx), true);
+  } else {
+    asper_llg_memory_clear(llama_get_memory(u->lctx), true);
+  }
 
   /* Fresh sampler chain per call: grammar state is per-generation. */
   chain = llama_sampler_chain_init(llama_sampler_chain_default_params());
@@ -196,7 +221,7 @@ static asper_err cll_generate(void *ud, const char *system_prompt,
   }
   if (gbnf != NULL) {
     struct llama_sampler *grammar =
-        llama_sampler_init_grammar(u->vocab, gbnf, "root");
+        asper_llg_sampler_init_grammar(u->vocab, gbnf, "root");
     if (grammar == NULL) {
       e = ASPER_ERR_MODEL; /* GBNF failed to parse */
       goto out;
@@ -210,14 +235,14 @@ static asper_err cll_generate(void *ud, const char *system_prompt,
   }
   llama_sampler_chain_add(chain, greedy);
 
-  for (i = 0; i < n_tok; i += u->n_batch) {
+  for (i = prompt_start; i < n_tok; i += u->n_batch) {
     if (deadline_ms > 0 && os_monotonic_ms() >= deadline_ms) {
       e = ASPER_ERR_BUSY;
       goto out;
     }
     int32_t chunk = n_tok - i < u->n_batch ? n_tok - i : u->n_batch;
     struct llama_batch batch = llama_batch_get_one(tok + i, chunk);
-    if (llama_decode(u->lctx, batch) != 0) {
+    if (asper_llg_decode(u->lctx, batch) != 0) {
       e = ASPER_ERR_MODEL;
       goto out;
     }
@@ -231,7 +256,11 @@ static asper_err cll_generate(void *ud, const char *system_prompt,
       e = ASPER_ERR_BUSY;
       goto out;
     }
-    llama_token t = llama_sampler_sample(chain, u->lctx, -1);
+    llama_token t;
+    if (asper_llg_sampler_sample(chain, u->lctx, -1, &t) != 0) {
+      /* a sampler-side exception ends the generation with what we have */
+      break;
+    }
     if (llama_vocab_is_eog(u->vocab, t))
       break;
     e = cll_append_piece(u->vocab, t, &outbuf);
@@ -242,7 +271,7 @@ static asper_err cll_generate(void *ud, const char *system_prompt,
       break;
     {
       struct llama_batch batch = llama_batch_get_one(&t, 1);
-      if (llama_decode(u->lctx, batch) != 0) {
+      if (asper_llg_decode(u->lctx, batch) != 0) {
         e = ASPER_ERR_MODEL;
         goto out;
       }
@@ -260,6 +289,16 @@ static asper_err cll_generate(void *ud, const char *system_prompt,
     (*out_text)[0] = '\0';
   }
   e = ASPER_OK;
+  if (u->kv_cache) {
+    llama_token *cached =
+        (llama_token *)malloc((size_t)n_tok * sizeof *cached);
+    if (cached) {
+      memcpy(cached, tok, (size_t)n_tok * sizeof *cached);
+      free(u->cached_prompt);
+      u->cached_prompt = cached;
+      u->cached_prompt_n = n_tok;
+    }
+  }
 
 out:
   if (chain != NULL)
@@ -267,6 +306,12 @@ out:
   free(tok);
   free(prompt);
   asper_buf_free(&outbuf);
+  if (e != ASPER_OK) {
+    free(u->cached_prompt);
+    u->cached_prompt = NULL;
+    u->cached_prompt_n = 0;
+    asper_llg_memory_clear(llama_get_memory(u->lctx), true);
+  }
   return e;
 }
 
@@ -279,8 +324,8 @@ static int cll_count_tokens(void *ud, const char *text)
     return 0;
   if (strlen(text) > (size_t)INT32_MAX)
     return -1;
-  n = llama_tokenize(u->vocab, text, (int32_t)strlen(text), NULL, 0, false,
-                     false);
+  n = asper_llg_tokenize(u->vocab, text, (int32_t)strlen(text), NULL, 0,
+                         false, false);
   if (n == INT32_MIN)
     return -1;
   return n < 0 ? (int)-n : (int)n;
@@ -296,6 +341,7 @@ static void cll_destroy(void *ud)
     llama_free(u->lctx);
   if (u->model != NULL)
     llama_model_free(u->model);
+  free(u->cached_prompt);
   free(u);
 }
 
@@ -317,6 +363,7 @@ asper_err asper_curator_llama_create(asper_ctx *c, asper_curator_iface *out)
   u = (cll_ud *)calloc(1, sizeof *u);
   if (u == NULL)
     return asper_seterr(c, ASPER_ERR_NOMEM, "out of memory");
+  u->kv_cache = c->cfg.curator_kv_cache;
 
   mparams = llama_model_default_params();
   /* -1 = every layer in VRAM (llama.h: negative means all); 0 keeps

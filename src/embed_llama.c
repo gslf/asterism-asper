@@ -30,13 +30,20 @@
 #elif defined(__GNUC__)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wpedantic"
+#elif defined(_MSC_VER)
+#pragma warning(push)
+#pragma warning(disable : 4201) /* nameless struct/union */
 #endif
 #include "llama.h"
 #if defined(__clang__)
 #pragma clang diagnostic pop
 #elif defined(__GNUC__)
 #pragma GCC diagnostic pop
+#elif defined(_MSC_VER)
+#pragma warning(pop)
 #endif
+
+#include "llama_guard.h"
 
 #if !defined(ASPER_NO_THREADS)
 #if defined(_WIN32)
@@ -145,7 +152,8 @@ static asper_err ell_tokenize(const struct llama_vocab *vocab,
   if (strlen(text) > (size_t)INT32_MAX)
     return ASPER_ERR_INVALID;
   len = (int32_t)strlen(text);
-  n = llama_tokenize(vocab, text, len, NULL, 0, add_special, parse_special);
+  n = asper_llg_tokenize(vocab, text, len, NULL, 0, add_special,
+                         parse_special);
   if (n == INT32_MIN)
     return ASPER_ERR_MODEL;
   if (n < 0)
@@ -155,7 +163,8 @@ static asper_err ell_tokenize(const struct llama_vocab *vocab,
   tok = (llama_token *)malloc((size_t)n * sizeof *tok);
   if (tok == NULL)
     return ASPER_ERR_NOMEM;
-  got = llama_tokenize(vocab, text, len, tok, n, add_special, parse_special);
+  got = asper_llg_tokenize(vocab, text, len, tok, n, add_special,
+                           parse_special);
   if (got < 0) {
     free(tok);
     return ASPER_ERR_MODEL;
@@ -208,14 +217,14 @@ static asper_err ell_embed_one(ell_ud *u, struct llama_context *lctx,
 
   /* Reset any sequence state left by the previous call (NULL-safe for
    * memory-less encoder contexts). */
-  llama_memory_clear(llama_get_memory(lctx), true);
+  asper_llg_memory_clear(llama_get_memory(lctx), true);
 
   /* llama_batch_get_one: seq 0, auto positions; with embeddings enabled
    * every token is an output, which mean pooling requires. */
   {
     struct llama_batch batch = llama_batch_get_one(tok, n_tok);
-    rc = u->encoder_only ? llama_encode(lctx, batch)
-                         : llama_decode(lctx, batch);
+    rc = u->encoder_only ? asper_llg_encode(lctx, batch)
+                         : asper_llg_decode(lctx, batch);
   }
   free(tok);
   if (rc != 0)
