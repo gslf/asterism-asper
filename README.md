@@ -19,14 +19,21 @@ Full specification: [docs/SPECS.md](docs/SPECS.md).
 ## Build
 
 ```sh
+mkdir asterism && cd asterism
 git clone --recursive https://github.com/gslf/asterism-asper.git
+git clone https://github.com/gslf/asterism-asmodel.git
 cd asterism-asper
 cmake -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j
 ctest --test-dir build --output-on-failure
 ```
 
-CMake options: `ASPER_BUILD_MCP` (ON), `ASPER_BUILD_TESTS` (ON), `ASPER_NO_THREADS` (OFF), `ASPER_SANITIZERS` (OFF), `ASPER_WITH_LLAMA` (ON — set OFF for a fast, inference-less build, the full test suite passes either way).
+`asterism-asmodel` is expected next to this repository; use
+`-DASPER_ASMODEL_DIR=/path/to/asterism-asmodel` for another layout. CMake
+options: `ASPER_BUILD_MCP` (ON), `ASPER_BUILD_TESTS` (ON),
+`ASPER_NO_THREADS` (OFF), `ASPER_SANITIZERS` (OFF), `ASPER_WITH_LLAMA`
+(ON — set OFF for a fast, inference-less build, the full test suite passes
+either way).
 
 **Upstream llama.cpp compatibility.** The pinned `deps/llama.cpp`
 submodule is built unmodified: Asper does not apply or require a custom

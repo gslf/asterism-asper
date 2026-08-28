@@ -5,6 +5,9 @@ on:
     branches: [main]
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   build-test:
     name: ${{ matrix.name }}
@@ -18,10 +21,19 @@ jobs:
           - { name: macos-clang,   os: macos-latest,   cc: clang, cxx: clang++ }
           - { name: windows-msvc,  os: windows-latest, cc: cl,    cxx: cl }
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout Asper
+        uses: actions/checkout@v7
         with:
-          submodules: true
+          path: asterism-asper
+          submodules: recursive
+      - name: Checkout pinned asmodel
+        uses: actions/checkout@v7
+        with:
+          repository: gslf/asterism-asmodel
+          ref: f84adc2962e93f82261ae9c1cfc19d60513198e5
+          path: asterism-asmodel
       - name: Configure
+        working-directory: asterism-asper
         env:
           CC: ${{ matrix.cc }}
           CXX: ${{ matrix.cxx }}
@@ -29,51 +41,85 @@ jobs:
         # pass without model inference (scripted curator + fake embedder).
         run: cmake -B build -DCMAKE_BUILD_TYPE=Release -DASPER_WITH_LLAMA=OFF
       - name: Build
+        working-directory: asterism-asper
         run: cmake --build build --config Release -j 4
       - name: Test
+        working-directory: asterism-asper
         run: ctest --test-dir build -C Release --output-on-failure
 
   sanitizers:
     name: linux-asan-ubsan
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout Asper
+        uses: actions/checkout@v7
         with:
-          submodules: true
+          path: asterism-asper
+          submodules: recursive
+      - name: Checkout pinned asmodel
+        uses: actions/checkout@v7
+        with:
+          repository: gslf/asterism-asmodel
+          ref: f84adc2962e93f82261ae9c1cfc19d60513198e5
+          path: asterism-asmodel
       - name: Configure
+        working-directory: asterism-asper
         env: { CC: clang, CXX: clang++ }
         run: >
           cmake -B build -DCMAKE_BUILD_TYPE=Debug
           -DASPER_WITH_LLAMA=OFF -DASPER_SANITIZERS=ON
       - name: Build
+        working-directory: asterism-asper
         run: cmake --build build -j 4
       - name: Test
+        working-directory: asterism-asper
         run: ctest --test-dir build --output-on-failure
 
   no-threads:
     name: linux-no-threads
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout Asper
+        uses: actions/checkout@v7
         with:
-          submodules: true
+          path: asterism-asper
+          submodules: recursive
+      - name: Checkout pinned asmodel
+        uses: actions/checkout@v7
+        with:
+          repository: gslf/asterism-asmodel
+          ref: f84adc2962e93f82261ae9c1cfc19d60513198e5
+          path: asterism-asmodel
       - name: Configure
+        working-directory: asterism-asper
         run: >
           cmake -B build -DCMAKE_BUILD_TYPE=Release
           -DASPER_WITH_LLAMA=OFF -DASPER_NO_THREADS=ON
       - name: Build
+        working-directory: asterism-asper
         run: cmake --build build -j 4
       - name: Test
+        working-directory: asterism-asper
         run: ctest --test-dir build --output-on-failure
 
   llama-build:
     name: linux-with-llama (build only)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout Asper
+        uses: actions/checkout@v7
         with:
-          submodules: true
+          path: asterism-asper
+          submodules: recursive
+      - name: Checkout pinned asmodel
+        uses: actions/checkout@v7
+        with:
+          repository: gslf/asterism-asmodel
+          ref: f84adc2962e93f82261ae9c1cfc19d60513198e5
+          path: asterism-asmodel
       - name: Configure
+        working-directory: asterism-asper
         run: cmake -B build -DCMAKE_BUILD_TYPE=Release -DASPER_WITH_LLAMA=ON -DASPER_BUILD_TESTS=OFF
       - name: Build
+        working-directory: asterism-asper
         run: cmake --build build -j 4
