@@ -308,7 +308,7 @@ asper_err asper_event_append(asper_ctx *c, const asper_event_input *event,
   event_scan scan;
   asper_err e;
   size_t text_len, obj_len;
-  long long at;
+  long long at = 0;
   if (!c || !event || !scope_valid(event->scope) || !event->text)
     return c ? asper_seterr(c, ASPER_ERR_INVALID,
                             "source: invalid event arguments")
