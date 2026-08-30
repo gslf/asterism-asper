@@ -161,6 +161,14 @@ const char *asper_record_tag(const asper_record *r, size_t i) {
   return (r && i < r->tags_n) ? r->tags[i] : NULL;
 }
 
+size_t asper_record_source_ref_count(const asper_record *r) {
+  return r ? r->source_refs_n : 0;
+}
+
+const char *asper_record_source_ref(const asper_record *r, size_t i) {
+  return r && i < r->source_refs_n ? r->source_refs[i] : NULL;
+}
+
 double asper_record_score(const asper_record *r) {
   return r ? r->score : 0.0;
 }
@@ -531,6 +539,7 @@ static void ctx_destroy(asper_ctx *c, bool store_opened) {
   os_mutex_destroy(&c->ev_mu);
   os_mutex_destroy(&c->log_mu);
   os_mutex_destroy(&c->err_mu);
+  os_mutex_destroy(&c->source_mu);
   os_mutex_destroy(&c->cache_mu);
   os_mutex_destroy(&c->journal_mu);
   os_rwlock_destroy(&c->lock);
@@ -577,6 +586,7 @@ static asper_err asper_open_impl(const asper_open_params *p,
   os_rwlock_init(&c->lock);
   os_mutex_init(&c->journal_mu);
   os_mutex_init(&c->cache_mu);
+  os_mutex_init(&c->source_mu);
   os_mutex_init(&c->err_mu);
   os_mutex_init(&c->ev_mu);
   os_mutex_init(&c->log_mu);
@@ -744,7 +754,12 @@ static asper_err asper_open_impl(const asper_open_params *p,
     free(stale);
   }
 
-  /* 7. Worker. */
+  /* 7. Restore semantic work from the durable exact source before the
+   * worker starts. A hard crash can lose RAM, never the curation input. */
+  e = asper_source_replay_pending(c);
+  if (e != ASPER_OK) goto fail;
+
+  /* 8. Worker. */
   e = asper_worker_start(c);
   if (e != ASPER_OK) goto fail;
 
@@ -801,14 +816,10 @@ void asper_close(asper_ctx *c) {
 
 /* ---- hot path ----------------------------------------------------------- */
 
-asper_err asper_observe_turn(asper_ctx *c, asper_role role,
-                             const char *text_utf8) {
+asper_err asper_enqueue_turn(asper_ctx *c, asper_role role,
+                             const char *text_utf8, asper_time now,
+                             const char *source_id) {
   char *copy;
-  asper_time now;
-  bool dropped = false;
-  size_t dropped_total = 0;
-  asper_err e = ASPER_OK;
-
   if (!c) return ASPER_ERR_INVALID;
   if (role != ASPER_ROLE_USER && role != ASPER_ROLE_ASSISTANT)
     return asper_seterr(c, ASPER_ERR_INVALID, "invalid role");
@@ -816,21 +827,13 @@ asper_err asper_observe_turn(asper_ctx *c, asper_role role,
     return asper_seterr(c, ASPER_ERR_INVALID, "empty turn text");
   if (!asper_utf8_count(text_utf8, NULL))
     return asper_seterr(c, ASPER_ERR_INVALID, "turn text is not valid UTF-8");
+  if (!asper_uuid_valid(source_id))
+    return asper_seterr(c, ASPER_ERR_INVALID, "invalid source event id");
 
   copy = asper_strdup(text_utf8);
   if (!copy) return asper_seterr(c, ASPER_ERR_NOMEM, "out of memory");
-  now = asper_clock_now(&c->clock);
 
   os_mutex_lock(&c->ev_mu);
-  if (c->cfg.event_queue_max > 0 &&
-      c->turns_n >= (size_t)c->cfg.event_queue_max) {
-    free(c->turns[0].text);
-    memmove(c->turns, c->turns + 1, (c->turns_n - 1) * sizeof *c->turns);
-    c->turns_n--;
-    c->turns_dropped++;
-    dropped = true;
-    dropped_total = c->turns_dropped;
-  }
   if (c->turns_n == c->turns_cap) {
     size_t ncap = c->turns_cap ? c->turns_cap * 2 : 16;
     asper_turn *nt = realloc(c->turns, ncap * sizeof *nt);
@@ -845,6 +848,7 @@ asper_err asper_observe_turn(asper_ctx *c, asper_role role,
   c->turns[c->turns_n].role = role;
   c->turns[c->turns_n].text = copy;
   c->turns[c->turns_n].at = now;
+  memcpy(c->turns[c->turns_n].source_id, source_id, 37);
   c->turns_n++;
   c->last_turn_at = now;
   /* Wake the worker on EVERY enqueued turn so the idle-flush deadline
@@ -853,16 +857,11 @@ asper_err asper_observe_turn(asper_ctx *c, asper_role role,
   if (!c->no_threads && c->worker_running)
     os_cond_signal(&c->ev_cv);
   os_mutex_unlock(&c->ev_mu);
-
-  if (dropped)
-    asper_log(c, ASPER_LOG_WARN, "worker",
-              "event queue full: oldest turn dropped (%zu total)",
-              dropped_total);
-  return e;
+  return ASPER_OK;
 }
 
-asper_err asper_build_prompt(asper_ctx *c, const char *base_system_prompt,
-                             const char *user_message, char **out_prompt) {
+asper_err asper_memory_render(asper_ctx *c, const char *base_system_prompt,
+                              const char *user_message, char **out_prompt) {
   asper_record **idr = NULL, **ctxr = NULL, **prr = NULL;
   size_t idn = 0, ctxn = 0, prn = 0, i;
   char *proj = NULL;

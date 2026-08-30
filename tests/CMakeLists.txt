@@ -37,6 +37,7 @@ set(ASPER_TEST_PROGRAMS
   test_json
   test_log
   test_stats_projects
+  test_source
 )
 
 foreach(test_name IN LISTS ASPER_TEST_PROGRAMS)

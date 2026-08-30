@@ -45,7 +45,7 @@ void asper_config_defaults(asper_config *cfg) {
   cfg->curator_gpu_layers = -1; /* all in VRAM when a GPU backend exists */
   cfg->curator_backend = ASMODEL_BACKEND_EMBEDDED;
   cfg->curator_remote_model = asper_strdup("qwen2.5-1.5b-instruct");
-  cfg->curator_api_grammar = asper_strdup("none");
+  cfg->curator_remote_provider = ASMODEL_REMOTE_GENERIC;
   cfg->curator_kv_cache = true;
   cfg->instruction_path = NULL;
 
@@ -116,7 +116,6 @@ void asper_config_free(asper_config *cfg) {
   free(cfg->curator_base_url);
   free(cfg->curator_remote_model);
   free(cfg->curator_api_key_env);
-  free(cfg->curator_api_grammar);
   free(cfg->instruction_path);
   free(cfg->embed_model_path);
   free(cfg->embed_base_url);
@@ -168,6 +167,14 @@ static const enum_map BACKEND_MAP[] = {
     {NULL, 0},
 };
 
+static const enum_map PROVIDER_MAP[] = {
+    {"generic", ASMODEL_REMOTE_GENERIC},
+    {"llama-server", ASMODEL_REMOTE_LLAMA_SERVER},
+    {"lmstudio", ASMODEL_REMOTE_LMSTUDIO},
+    {"vllm", ASMODEL_REMOTE_VLLM},
+    {NULL, 0},
+};
+
 typedef enum {
   K_INT,  /* int, must be >= 1                                   */
   K_NNI,  /* int, must be >= 0                                   */
@@ -213,7 +220,7 @@ static const cfg_key CFG_KEYS[] = {
     {"curator", "base_url", K_NSTR, OFF(curator_base_url), NULL},
     {"curator", "remote_model", K_STR, OFF(curator_remote_model), NULL},
     {"curator", "api_key_env", K_NSTR, OFF(curator_api_key_env), NULL},
-    {"curator", "api_grammar", K_STR, OFF(curator_api_grammar), NULL},
+    {"curator", "provider", K_ENUM, OFF(curator_remote_provider), PROVIDER_MAP},
     {"curator", "ram_mb", K_NNI, OFF(curator_ram_mb), NULL},
     {"curator", "vram_mb", K_NNI, OFF(curator_vram_mb), NULL},
     {"curator", "kv_cache", K_BOOL, OFF(curator_kv_cache), NULL},
@@ -423,8 +430,7 @@ static asper_err cfg_apply(asper_ctx *c, asper_config *cfg, const cfg_key *k,
  * verify its owned strings here, on the load path every open takes. */
 static asper_err cfg_check_defaults(asper_ctx *c, const asper_config *cfg) {
   if (!cfg->curator_model_path || !cfg->embed_model_path ||
-      !cfg->curator_remote_model || !cfg->curator_api_grammar ||
-      !cfg->embed_remote_model ||
+      !cfg->curator_remote_model || !cfg->embed_remote_model ||
       !cfg->query_prefix || !cfg->passage_prefix)
     return asper_seterr(c, ASPER_ERR_NOMEM,
                         "config: out of memory building defaults");
@@ -519,13 +525,6 @@ asper_err asper_config_load(asper_ctx *c, asper_config *cfg,
        (!cfg->embed_base_url || !cfg->embed_base_url[0]))) {
     e = asper_seterr(c, ASPER_ERR_CONFIG,
                      "config: OpenAI backend requires base_url");
-    goto done;
-  }
-  if (strcmp(cfg->curator_api_grammar, "none") != 0 &&
-      strcmp(cfg->curator_api_grammar, "llama") != 0 &&
-      strcmp(cfg->curator_api_grammar, "vllm") != 0) {
-    e = asper_seterr(c, ASPER_ERR_CONFIG,
-                     "config: curator.api_grammar must be none, llama or vllm");
     goto done;
   }
   e = ASPER_OK;

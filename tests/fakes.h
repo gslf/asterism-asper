@@ -65,6 +65,9 @@ typedef struct {
 void fake_clock_set(fake_clock *fc, int64_t t);
 asper_clock fake_clock_make(fake_clock *fc);
 
+asper_err fake_event_append(asper_ctx *c, const char *scope,
+                            asper_event_kind kind, const char *text);
+
 #ifdef __cplusplus
 }
 #endif

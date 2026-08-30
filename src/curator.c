@@ -435,7 +435,9 @@ static cycle_op_result funnel_apply(asper_ctx *c, asper_op *op,
 }
 
 static cycle_op_result cycle_do_insert(asper_ctx *c, const asper_cop *cop,
-                                       const char *project, asper_time now)
+                                       const char *project, asper_time now,
+                                       const asper_turn *turns,
+                                       size_t n_turns)
 {
   const char *text = cop->text ? cop->text : "";
   const char *sec = asper_section_name(cop->section);
@@ -532,6 +534,28 @@ static cycle_op_result cycle_do_insert(asper_ctx *c, const asper_cop *cop,
   r->supersedes[0] = '\0';
   r->score = 0.0;
   r->emb_row = -1;
+  if (n_turns > 0) {
+    r->source_refs = (char **)calloc(n_turns, sizeof(char *));
+    if (!r->source_refs) {
+      asper_record_free_one(r);
+      count_drop(c, what, "out of memory");
+      return CYCLE_OP_REJECTED;
+    }
+    for (size_t i = 0; i < n_turns; i++) {
+      bool seen = false;
+      if (!asper_uuid_valid(turns[i].source_id)) continue;
+      for (size_t j = 0; j < r->source_refs_n; j++)
+        if (strcmp(r->source_refs[j], turns[i].source_id) == 0) seen = true;
+      if (seen) continue;
+      r->source_refs[r->source_refs_n] = asper_strdup(turns[i].source_id);
+      if (!r->source_refs[r->source_refs_n]) {
+        asper_record_free_one(r);
+        count_drop(c, what, "out of memory");
+        return CYCLE_OP_REJECTED;
+      }
+      r->source_refs_n++;
+    }
+  }
 
   char what_id[104];
   snprintf(what_id, sizeof what_id, "%s %s", what, r->id);
@@ -766,7 +790,7 @@ asper_err asper_curation_cycle(asper_ctx *c, bool force)
       cycle_op_result res;
       switch (cop->kind) {
       case ASPER_COP_INSERT:
-        res = cycle_do_insert(c, cop, project, now);
+        res = cycle_do_insert(c, cop, project, now, turns, n_turns);
         break;
       case ASPER_COP_UPDATE:
       case ASPER_COP_DEPRECATE:
@@ -789,6 +813,13 @@ asper_err asper_curation_cycle(asper_ctx *c, bool force)
     (void)pending; /* visible via its own INFO lines */
 
     cycle_epilogue(c);
+    {
+      asper_err ack = asper_source_mark_curated(c, turns, n_turns);
+      if (ack != ASPER_OK)
+        asper_log(c, ASPER_LOG_WARN, "source",
+                  "curation acknowledgement failed (%s); batch will be "
+                  "safely replayed after restart", asper_err_name(ack));
+    }
 
     size_t cycle_no;
     os_rwlock_wrlock(&c->lock);

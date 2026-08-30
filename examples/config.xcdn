@@ -41,7 +41,7 @@
     base_url: null,            // e.g. "http://127.0.0.1:1234/v1"
     remote_model: "qwen2.5-1.5b-instruct",
     api_key_env: null,         // environment variable name, never the secret
-    api_grammar: "none",       // "none" | "llama" | "vllm"
+    provider: "generic",       // "generic" | "llama-server" | "lmstudio" | "vllm"
     ram_mb: 0,                 // 0 = estimate embedded weights / zero for API
     vram_mb: 0,                // declared cost used by the manager
     kv_cache: true,            // reuse the longest common prompt prefix

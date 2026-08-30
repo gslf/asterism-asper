@@ -19,16 +19,15 @@ text the user can inspect and hand-edit.
 Follow this discipline in every conversation:
 
 1. **Ground first.** Early in a conversation — and again on a clear topic
-   shift — call `context_build` with the current user message
-   (`user_message`, optional `base_system_prompt`). It returns a prompt with
-   the relevant memory injected under `# Memory`. If you cannot replace your
-   own system prompt, read the returned memory block and treat it as trusted
-   working context about who you are, who the user is, and the active project.
-2. **Observe continuously.** After each meaningful exchange, feed both sides
-   to the curator: `observe_turn` with `role: "user"` and the user's message,
-   then `role: "assistant"` and your reply. This is fire-and-forget: curation
-   is asynchronous and never blocks. Prefer this over manual insertion — let
-   the curator decide what is worth keeping.
+   shift — call `context_materialize` with a stable conversation `scope`, the
+   current message as `query`, and explicit `history_tokens` and
+   `checkpoint_tokens` budgets sized to the consuming model. Read both the
+   returned semantic system prompt and exact source context.
+2. **Append source continuously.** After each meaningful exchange, append both
+   sides with `source_append`, using the same stable `scope`, `kind: "user"`
+   for the user's message and `kind: "assistant"` for the reply. Source events
+   are immutable and curation is asynchronous. Prefer this over manual record
+   insertion; let the curator decide what becomes semantic memory.
 3. **Recall on demand.** When the user references something from the past
    ("as we discussed", "my usual setup", "where were we on X"):
    - `memory_recall` (`question`) asks the curator and returns an answer with
@@ -69,7 +68,7 @@ forget something — otherwise trust the curator.
 If the local GGUF models (curator + embeddings) are not installed, Asper runs
 degraded: identity injection, insert, list, update, and deprecate still work,
 but semantic search, recall, retrieval-based injection, and curation are
-disabled. If `memory_search`/`memory_recall` error or `context_build` returns
-only identity, say so plainly and tell the user to install the two model files
+disabled. If `memory_search`/`memory_recall` error or context materialization
+returns only identity, say so plainly and tell the user to install the two model files
 into the `models/` directory of Asper's data directory (see the plugin README)
 — do not silently pretend the memory is empty.

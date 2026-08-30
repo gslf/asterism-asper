@@ -28,7 +28,7 @@ extern "C" {
 #endif
 
 #define ASPER_VERSION_MAJOR 0
-#define ASPER_VERSION_MINOR 1
+#define ASPER_VERSION_MINOR 2
 #define ASPER_VERSION_PATCH 0
 
 /* Returns "major.minor.patch". */
@@ -61,10 +61,96 @@ typedef enum {
   ASPER_SECTION_ANY      = 3
 } asper_section;
 
+/* ---- lossless scoped source memory ------------------------------------ */
+
+/* Events are the immutable source of truth.  Curated records, checkpoints,
+ * summaries and embeddings are derived views and may always be rebuilt from
+ * this log.  Scopes are host-defined stable slugs (for example an ASNGN
+ * session id). */
 typedef enum {
-  ASPER_ROLE_USER = 0,
-  ASPER_ROLE_ASSISTANT = 1
-} asper_role;
+  ASPER_EVENT_USER = 0,
+  ASPER_EVENT_ASSISTANT,
+  ASPER_EVENT_DECISION,
+  ASPER_EVENT_TOOL_CALL,
+  ASPER_EVENT_TOOL_RESULT,
+  ASPER_EVENT_DIAGNOSTIC,
+  ASPER_EVENT_CHECKPOINT,
+  ASPER_EVENT_ARTIFACT
+} asper_event_kind;
+
+typedef struct {
+  const char *scope;
+  asper_event_kind kind;
+  const char *text;       /* UTF-8; copied and persisted before return */
+  const char *object_ref; /* optional sha256:<hex> source object */
+  int pinned;
+} asper_event_input;
+
+typedef struct {
+  char id[37];
+  unsigned long long sequence;
+  long long at;
+  asper_event_kind kind;
+  char *text;             /* asper_events_free */
+  char object_ref[72];
+  int pinned;
+} asper_event;
+
+/* Synchronous and durable.  Success means the exact event is in the scoped
+ * append-only source log; it never depends on curator availability. */
+asper_err asper_event_append(asper_ctx *c, const asper_event_input *event,
+                             char out_id[37]);
+asper_err asper_event_list(asper_ctx *c, const char *scope,
+                           asper_event **out, size_t *out_n);
+asper_err asper_event_set_pinned(asper_ctx *c, const char *scope,
+                                 const char *event_id, int pinned);
+void asper_events_free(asper_event *events, size_t n);
+
+/* Content-addressed exact objects.  Writes are atomic and deduplicated.
+ * offset/max_bytes implement lossless range reads; max_bytes == 0 means the
+ * complete remainder. */
+asper_err asper_object_put(asper_ctx *c, const void *data, size_t size,
+                           char out_ref[72]);
+asper_err asper_object_read(asper_ctx *c, const char *object_ref,
+                            size_t offset, size_t max_bytes,
+                            void **out_data, size_t *out_size);
+
+/* A checkpoint is the current structured working-memory view for one scope.
+ * Replacing it is atomic; every committed value is also appended to the
+ * immutable event log with kind ASPER_EVENT_CHECKPOINT. */
+asper_err asper_checkpoint_commit(asper_ctx *c, const char *scope,
+                                   const char *text_utf8,
+                                   char out_event_id[37]);
+asper_err asper_checkpoint_load(asper_ctx *c, const char *scope,
+                                 char **out_text);
+
+typedef int (*asper_token_count_fn)(const char *utf8, void *userdata);
+
+typedef struct {
+  const char *scope;
+  const char *base_system_prompt;
+  const char *query;
+  size_t history_tokens;       /* exact recent/pinned/source event budget */
+  size_t checkpoint_tokens;    /* 0 excludes the checkpoint view */
+  asper_token_count_fn count_tokens; /* NULL => deterministic heuristic */
+  void *count_userdata;
+} asper_context_request;
+
+typedef struct {
+  char *system_prompt; /* base + semantic identity/context/project memory */
+  char *context_text;  /* checkpoint + selected exact source events */
+  size_t system_tokens;
+  size_t context_tokens;
+  size_t events_included;
+  size_t events_available;
+} asper_context_pack;
+
+/* Materialize the best bounded memory view for a model call.  Selection is
+ * deterministic and never mutates/deletes source data. */
+asper_err asper_context_materialize(asper_ctx *c,
+                                    const asper_context_request *request,
+                                    asper_context_pack *out);
+void asper_context_pack_free(asper_context_pack *pack);
 
 /* Log levels for asper_set_logger callbacks. */
 enum {
@@ -102,15 +188,6 @@ void        asper_close(asper_ctx *c);
 /* UTF-8 message for the most recent error on this context; ctx-owned. */
 const char *asper_last_error(const asper_ctx *c);
 
-/* ---- hot path ---------------------------------------------------------- */
-
-asper_err asper_observe_turn(asper_ctx *c, asper_role role,
-                             const char *text_utf8);
-/* Returns base_system_prompt + rendered memory block in *out_prompt
- * (asper_free). Deterministic: same store + same inputs => same bytes. */
-asper_err asper_build_prompt(asper_ctx *c, const char *base_system_prompt,
-                             const char *user_message, char **out_prompt);
-
 /* ---- records ----------------------------------------------------------- */
 
 typedef struct asper_record asper_record;
@@ -134,6 +211,9 @@ int           asper_record_deprecated(const asper_record *r);
 const char   *asper_record_supersedes(const asper_record *r);
 size_t        asper_record_tag_count(const asper_record *r);
 const char   *asper_record_tag(const asper_record *r, size_t i);
+/* Immutable event UUIDs that substantiate a curator-created record. */
+size_t        asper_record_source_ref_count(const asper_record *r);
+const char   *asper_record_source_ref(const asper_record *r, size_t i);
 /* Retrieval score when the record came from asper_memory_search; else 0. */
 double        asper_record_score(const asper_record *r);
 

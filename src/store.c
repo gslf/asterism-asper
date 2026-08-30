@@ -30,6 +30,8 @@ void asper_record_free_one(asper_record *r) {
   free(r->content);
   for (size_t i = 0; i < r->tags_n; i++) free(r->tags[i]);
   free(r->tags);
+  for (size_t i = 0; i < r->source_refs_n; i++) free(r->source_refs[i]);
+  free(r->source_refs);
   free(r);
 }
 
@@ -63,6 +65,15 @@ asper_record *asper_record_clone(const asper_record *r) {
     for (size_t i = 0; i < r->tags_n; i++) {
       n->tags[i] = asper_strdup(r->tags[i]);
       if (r->tags[i] && !n->tags[i]) goto fail;
+    }
+  }
+  if (r->source_refs_n > 0) {
+    n->source_refs = (char **)calloc(r->source_refs_n, sizeof(char *));
+    if (!n->source_refs) goto fail;
+    n->source_refs_n = r->source_refs_n;
+    for (size_t i = 0; i < r->source_refs_n; i++) {
+      n->source_refs[i] = asper_strdup(r->source_refs[i]);
+      if (!n->source_refs[i]) goto fail;
     }
   }
   return n;

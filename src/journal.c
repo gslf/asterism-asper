@@ -343,6 +343,22 @@ static xcdn_node_t *record_build_node(const asper_record *r) {
   if (ok)
     ok = xobj_put(obj, "source",
                   xcdn_value_string(asper_source_name(r->source)));
+  if (ok && r->source_refs_n > 0) {
+    xcdn_value_t *refs = xcdn_value_array();
+    if (!refs) {
+      ok = false;
+    } else {
+      bool rok = true;
+      for (size_t i = 0; rok && i < r->source_refs_n; i++)
+        rok = xarr_push(refs, xcdn_value_uuid(r->source_refs[i]));
+      if (!rok) {
+        xcdn_value_free(refs);
+        ok = false;
+      } else {
+        ok = xobj_put(obj, "source_refs", refs);
+      }
+    }
+  }
   if (ok) ok = xobj_put(obj, "created_at", dt_value(r->created_at));
   if (ok) ok = xobj_put(obj, "updated_at", dt_value(r->updated_at));
   if (ok) ok = xobj_put(obj, "last_access", dt_value(r->last_access));
@@ -593,6 +609,26 @@ asper_err asper_record_from_node(asper_ctx *c, const void *xcdn_node,
       REC_FAIL("record %s: invalid source", r->id);
   } else {
     r->source = ASPER_SRC_MANUAL; /* hand-added records are user records */
+  }
+
+  v = obj_field(obj, "source_refs");
+  if (v && v->type != XCDN_VAL_NULL) {
+    if (v->type != XCDN_VAL_ARRAY)
+      REC_FAIL("record %s: source_refs must be an array", r->id);
+    if (v->data.array.len > 0) {
+      r->source_refs =
+          (char **)calloc(v->data.array.len, sizeof(char *));
+      if (!r->source_refs) REC_OOM();
+      for (size_t i = 0; i < v->data.array.len; i++) {
+        const xcdn_node_t *rn = v->data.array.items[i];
+        char uuid[37];
+        if (!rn || !val_uuid37(rn->value, uuid))
+          REC_FAIL("record %s: source_refs must contain UUIDs", r->id);
+        r->source_refs[i] = asper_strdup(uuid);
+        if (!r->source_refs[i]) REC_OOM();
+        r->source_refs_n = i + 1;
+      }
+    }
   }
 
   now = asper_clock_now(&c->clock);

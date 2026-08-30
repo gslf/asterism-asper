@@ -174,8 +174,9 @@ TEST(stats_counters_lifecycle) {
   /* a scripted cycle: cycles_run, ops_applied, timestamps, compaction */
   ASSERT_TRUE(
       fake_curator_push(&g_cur, "INSERT context | Fresh fact from cycle\n"));
-  ASSERT_OK(asper_observe_turn(c, ASPER_ROLE_USER, "note the fresh fact"));
-  ASSERT_OK(asper_observe_turn(c, ASPER_ROLE_ASSISTANT, "ok"));
+  ASSERT_OK(fake_event_append(c, "test", ASPER_EVENT_USER,
+                              "note the fresh fact"));
+  ASSERT_OK(fake_event_append(c, "test", ASPER_EVENT_ASSISTANT, "ok"));
   ASSERT_OK(asper_flush(c, 1));
   ASSERT_OK(asper_get_stats(c, &st));
   ASSERT_EQ_INT(st.cycles_run, 1);
@@ -196,8 +197,8 @@ TEST(stats_counters_lifecycle) {
     script[pos + 502] = '\0';
     ASSERT_TRUE(fake_curator_push(&g_cur, script));
   }
-  ASSERT_OK(asper_observe_turn(c, ASPER_ROLE_USER, "another turn"));
-  ASSERT_OK(asper_observe_turn(c, ASPER_ROLE_ASSISTANT, "ok"));
+  ASSERT_OK(fake_event_append(c, "test", ASPER_EVENT_USER, "another turn"));
+  ASSERT_OK(fake_event_append(c, "test", ASPER_EVENT_ASSISTANT, "ok"));
   ASSERT_OK(asper_flush(c, 1));
   ASSERT_OK(asper_get_stats(c, &st));
   ASSERT_EQ_INT(st.cycles_run, 2);

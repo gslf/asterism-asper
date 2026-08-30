@@ -213,9 +213,27 @@ static int section_from_name(const char *s, asper_section *out) {
   return 0;
 }
 
-static int role_from_name(const char *s, asper_role *out) {
-  if (strcmp(s, "user") == 0)      { *out = ASPER_ROLE_USER;      return 1; }
-  if (strcmp(s, "assistant") == 0) { *out = ASPER_ROLE_ASSISTANT; return 1; }
+static int event_kind_from_name(const char *s, asper_event_kind *out) {
+  if (strcmp(s, "user") == 0) { *out = ASPER_EVENT_USER; return 1; }
+  if (strcmp(s, "assistant") == 0) {
+    *out = ASPER_EVENT_ASSISTANT;
+    return 1;
+  }
+  if (strcmp(s, "decision") == 0) { *out = ASPER_EVENT_DECISION; return 1; }
+  if (strcmp(s, "tool_call") == 0) { *out = ASPER_EVENT_TOOL_CALL; return 1; }
+  if (strcmp(s, "tool_result") == 0) {
+    *out = ASPER_EVENT_TOOL_RESULT;
+    return 1;
+  }
+  if (strcmp(s, "diagnostic") == 0) {
+    *out = ASPER_EVENT_DIAGNOSTIC;
+    return 1;
+  }
+  if (strcmp(s, "checkpoint") == 0) {
+    *out = ASPER_EVENT_CHECKPOINT;
+    return 1;
+  }
+  if (strcmp(s, "artifact") == 0) { *out = ASPER_EVENT_ARTIFACT; return 1; }
   return 0;
 }
 
@@ -609,18 +627,25 @@ static int tool_project_list(asper_ctx *c, const jx_value *args,
   return TOOL_OK;
 }
 
-static int tool_observe_turn(asper_ctx *c, const jx_value *args,
-                             jx_value **out, asper_err *aerr,
-                             const char **msg) {
-  const char *role_s = NULL, *text = NULL;
-  asper_role role = ASPER_ROLE_USER;
+static int tool_source_append(asper_ctx *c, const jx_value *args,
+                              jx_value **out, asper_err *aerr,
+                              const char **msg) {
+  const char *scope = NULL, *kind_s = NULL, *text = NULL;
+  asper_event_kind kind = ASPER_EVENT_USER;
+  asper_event_input event;
   asper_err e;
-  if (arg_str(args, "role", &role_s, msg) != 1 ||
-      !role_from_name(role_s, &role))
-    BADP("observe_turn: \"role\" must be \"user\" or \"assistant\"");
+  if (arg_str(args, "scope", &scope, msg) != 1)
+    BADP("source_append: \"scope\" must be a string");
+  if (arg_str(args, "kind", &kind_s, msg) != 1 ||
+      !event_kind_from_name(kind_s, &kind))
+    BADP("source_append: invalid \"kind\"");
   if (arg_str(args, "text", &text, msg) != 1)
-    BADP("observe_turn: \"text\" must be a string");
-  e = asper_observe_turn(c, role, text);
+    BADP("source_append: \"text\" must be a string");
+  memset(&event, 0, sizeof event);
+  event.scope = scope;
+  event.kind = kind;
+  event.text = text;
+  e = asper_event_append(c, &event, NULL);
   if (e != ASPER_OK) {
     *aerr = e;
     return TOOL_ASPER;
@@ -629,28 +654,51 @@ static int tool_observe_turn(asper_ctx *c, const jx_value *args,
   return *out ? TOOL_OK : TOOL_OOM;
 }
 
-static int tool_context_build(asper_ctx *c, const jx_value *args,
-                              jx_value **out, asper_err *aerr,
-                              const char **msg) {
-  const char *user_message = NULL, *base = NULL;
-  char *prompt = NULL;
+static int tool_context_materialize(asper_ctx *c, const jx_value *args,
+                                    jx_value **out, asper_err *aerr,
+                                    const char **msg) {
+  const char *scope = NULL, *query = NULL, *base = NULL;
+  long long history_tokens = 0, checkpoint_tokens = 0;
+  asper_context_request request;
+  asper_context_pack pack;
   asper_err e;
   jx_value *o;
   int ok;
 
-  if (arg_str(args, "user_message", &user_message, msg) != 1)
-    BADP("context_build: \"user_message\" must be a string");
+  if (arg_str(args, "scope", &scope, msg) != 1)
+    BADP("context_materialize: \"scope\" must be a string");
+  if (arg_str(args, "query", &query, msg) != 1)
+    BADP("context_materialize: \"query\" must be a string");
   if (arg_str(args, "base_system_prompt", &base, msg) < 0)
-    BADP("context_build: \"base_system_prompt\" must be a string");
-
-  e = asper_build_prompt(c, base ? base : "", user_message, &prompt);
+    BADP("context_materialize: \"base_system_prompt\" must be a string");
+  if (arg_int(args, "history_tokens", &history_tokens) != 1 ||
+      history_tokens < 0)
+    BADP("context_materialize: \"history_tokens\" must be >= 0");
+  if (arg_int(args, "checkpoint_tokens", &checkpoint_tokens) != 1 ||
+      checkpoint_tokens < 0)
+    BADP("context_materialize: \"checkpoint_tokens\" must be >= 0");
+  memset(&request, 0, sizeof request);
+  memset(&pack, 0, sizeof pack);
+  request.scope = scope;
+  request.query = query;
+  request.base_system_prompt = base ? base : "";
+  request.history_tokens = (size_t)history_tokens;
+  request.checkpoint_tokens = (size_t)checkpoint_tokens;
+  e = asper_context_materialize(c, &request, &pack);
   if (e != ASPER_OK) {
     *aerr = e;
     return TOOL_ASPER;
   }
   o = jx_object();
-  ok = jx_object_set(o, "prompt", jx_string(prompt ? prompt : "")) == 0;
-  asper_free(prompt);
+  ok = jx_object_set(o, "system_prompt",
+                     jx_string(pack.system_prompt ? pack.system_prompt : "")) == 0;
+  ok &= jx_object_set(o, "context",
+                      jx_string(pack.context_text ? pack.context_text : "")) == 0;
+  ok &= jx_object_set(o, "system_tokens",
+                      jx_int((long long)pack.system_tokens)) == 0;
+  ok &= jx_object_set(o, "context_tokens",
+                      jx_int((long long)pack.context_tokens)) == 0;
+  asper_context_pack_free(&pack);
   if (!ok) {
     jx_free(o);
     return TOOL_OOM;
@@ -791,23 +839,28 @@ static const tool_def TOOLS[] = {
      "List known project slugs.",
      "{\"type\":\"object\",\"properties\":{}}",
      tool_project_list},
-    {"observe_turn",
-     "Feed one conversation turn to the asynchronous curator.",
+    {"source_append",
+     "Append one immutable scoped source-memory event.",
      "{\"type\":\"object\",\"properties\":{"
-     "\"role\":{\"type\":\"string\",\"enum\":[\"user\",\"assistant\"],"
-     "\"description\":\"Speaker of the turn\"},"
+     "\"scope\":{\"type\":\"string\"},"
+     "\"kind\":{\"type\":\"string\",\"enum\":[\"user\",\"assistant\","
+     "\"decision\",\"tool_call\",\"tool_result\",\"diagnostic\","
+     "\"checkpoint\",\"artifact\"]},"
      "\"text\":{\"type\":\"string\",\"description\":\"Turn text\"}},"
-     "\"required\":[\"role\",\"text\"]}",
-     tool_observe_turn},
-    {"context_build",
-     "Assemble the host system prompt: base prompt plus injected memory.",
+     "\"required\":[\"scope\",\"kind\",\"text\"]}",
+     tool_source_append},
+    {"context_materialize",
+     "Materialize semantic and exact scoped context under token budgets.",
      "{\"type\":\"object\",\"properties\":{"
-     "\"user_message\":{\"type\":\"string\",\"description\":\"Current "
-     "user message, used as the retrieval query\"},"
+     "\"scope\":{\"type\":\"string\"},"
+     "\"query\":{\"type\":\"string\"},"
      "\"base_system_prompt\":{\"type\":\"string\",\"description\":\"Host "
-     "system prompt to prepend (default empty)\"}},"
-     "\"required\":[\"user_message\"]}",
-     tool_context_build},
+     "system prompt to prepend (default empty)\"},"
+     "\"history_tokens\":{\"type\":\"integer\",\"minimum\":0},"
+     "\"checkpoint_tokens\":{\"type\":\"integer\",\"minimum\":0}},"
+     "\"required\":[\"scope\",\"query\",\"history_tokens\","
+     "\"checkpoint_tokens\"]}",
+     tool_context_materialize},
     {"memory_stats",
      "Store and curation counters.",
      "{\"type\":\"object\",\"properties\":{}}",

@@ -110,6 +110,7 @@ set(ASPER_SOURCES
   src/config.c
   src/manifest.c
   src/store.c
+  src/source.c
   src/journal.c
   src/cache.c
   src/index.c

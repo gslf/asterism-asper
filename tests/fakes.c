@@ -175,3 +175,13 @@ asper_clock fake_clock_make(fake_clock *fc) {
   c.now = fake_clock_now_cb;
   return c;
 }
+
+asper_err fake_event_append(asper_ctx *c, const char *scope,
+                            asper_event_kind kind, const char *text) {
+  asper_event_input event;
+  memset(&event, 0, sizeof event);
+  event.scope = scope;
+  event.kind = kind;
+  event.text = text;
+  return asper_event_append(c, &event, NULL);
+}

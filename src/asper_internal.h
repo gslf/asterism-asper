@@ -58,6 +58,11 @@ typedef struct {
   size_t len, cap;
 } asper_buf;
 
+typedef enum {
+  ASPER_ROLE_USER = 0,
+  ASPER_ROLE_ASSISTANT = 1
+} asper_role;
+
 void      asper_buf_init(asper_buf *b);
 void      asper_buf_free(asper_buf *b);
 asper_err asper_buf_append(asper_buf *b, const char *data, size_t len);
@@ -161,6 +166,8 @@ struct asper_record {
   char supersedes[37];     /* empty string when null */
   char **tags;             /* owned array of owned strings */
   size_t tags_n;
+  char **source_refs;      /* source event UUIDs, owned */
+  size_t source_refs_n;
   /* -- volatile, not persisted -- */
   double score;            /* retrieval score on search results */
   int emb_row;             /* row in asper_index, -1 if absent */
@@ -215,7 +222,7 @@ typedef struct {
   int curator_gpu_layers;      /* -1 = all in VRAM (default), 0 = CPU */
   int curator_backend;
   char *curator_base_url, *curator_remote_model, *curator_api_key_env;
-  char *curator_api_grammar;
+  int curator_remote_provider;
   int curator_ram_mb, curator_vram_mb;
   bool curator_kv_cache;
   char *instruction_path;      /* NULL = built-in default */
@@ -519,6 +526,8 @@ asper_err asper_inject_render(asper_ctx *c, const char *base_system_prompt,
                               asper_record *const *ctxr, size_t ctx_n,
                               asper_record *const *proj, size_t proj_n,
                               const char *project_name, char **out_prompt);
+asper_err asper_memory_render(asper_ctx *c, const char *base_system_prompt,
+                              const char *query, char **out_prompt);
 
 /* Identity injection order: locked first, then relevance desc,
  * created_at asc, id asc. qsort comparator over asper_record*. */
@@ -575,6 +584,7 @@ typedef struct {
   asper_role role;
   char *text;      /* owned */
   asper_time at;
+  char source_id[37]; /* immutable source event UUID */
 } asper_turn;
 
 /* Curator-execution scheduling: every curator generation —
@@ -597,6 +607,15 @@ asper_err asper_run_due_work(asper_ctx *c, bool force_cycle, bool full);
 void      asper_access_note(asper_ctx *c, const char *id);
 /* Flush the pending access batch as one ACCESS op (no-op when empty). */
 asper_err asper_access_flush(asper_ctx *c);
+/* Queue a source-persisted user/assistant event for semantic curation. */
+asper_err asper_enqueue_turn(asper_ctx *c, asper_role role,
+                             const char *text_utf8, asper_time at,
+                             const char *source_id);
+/* Rebuild the semantic-curation FIFO from durable source events not yet
+ * acknowledged by a successful cycle, and acknowledge one completed batch. */
+asper_err asper_source_replay_pending(asper_ctx *c);
+asper_err asper_source_mark_curated(asper_ctx *c,
+                                    const asper_turn *turns, size_t n);
 
 /* ═══════════════════════ curator.c ═══════════════════════ */
 
@@ -672,6 +691,7 @@ struct asper_ctx {
   os_rwlock lock;               /* table + index + active_project + stats */
   os_mutex journal_mu;
   os_mutex cache_mu;             /* serializes cache snapshots/replaces */
+  os_mutex source_mu;            /* scoped source logs/objects/checkpoints */
   os_mutex err_mu;
   char err_buf[512];
 

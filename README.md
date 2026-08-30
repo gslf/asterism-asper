@@ -6,6 +6,12 @@ Asper is a local, self-curated long-term memory subsystem for language models, w
 
 Identity is the always-present first layer. The store is plain [xCDN](https://github.com/gslf/xCDN), so it's easy to inspect and edit. Curator inference and embeddings run in-process via llama.cpp, on a worker thread. They are owned by the shared `asmodel` runtime: standalone Asper creates its own manager, while an embedding host can lend a process-wide manager through `asper_open_at_with_models`.
 
+Exact scoped events are the source of truth. Asper also owns atomic working
+checkpoints and content-addressed objects for large payloads. Semantic records
+are bounded derivatives with source-event UUID provenance; unfinished curation
+is replayed after restart, so compaction saves context tokens without deleting
+information.
+
 Full specification: [docs/SPECS.md](docs/SPECS.md).
 
 
@@ -80,7 +86,7 @@ Unsloth Studio, or another compatible server):
     base_url: "http://127.0.0.1:1234/v1",
     remote_model: "qwen2.5-1.5b-instruct",
     api_key_env: "LOCAL_LLM_API_KEY",
-    api_grammar: "llama",
+    provider: "llama-server",
   },
   embedding: {
     backend: "openai",
@@ -92,9 +98,8 @@ Unsloth Studio, or another compatible server):
 ```
 
 `api_key_env` names an environment variable; credentials are never stored
-in the xCDN file. Use `api_grammar: "llama"` for llama.cpp/LM Studio style
-grammar support, `"vllm"` for structured outputs, or `"none"` for
-servers that only implement the OpenAI core.
+in the xCDN file. `provider` is explicit: `"llama-server"`, `"lmstudio"`,
+`"vllm"`, or `"generic"`.
 
 ## Quick start (C API)
 
@@ -105,13 +110,20 @@ asper_open_params p = { .memory_root = "./memory", .config_path = NULL };
 asper_ctx *ctx;
 asper_open(&p, &ctx);
 
-char *prompt;
-asper_build_prompt(ctx, "You are a helpful assistant.", "Ciao!", &prompt);
-/* ... run your model with `prompt` ... */
-asper_observe_turn(ctx, ASPER_ROLE_USER, "Ciao!");
-asper_observe_turn(ctx, ASPER_ROLE_ASSISTANT, "Ciao! Come posso aiutarti?");
+asper_event_input event = {
+  .scope = "chat-1", .kind = ASPER_EVENT_USER, .text = "Ciao!"
+};
+asper_event_append(ctx, &event, NULL);
 
-asper_free(prompt);
+asper_context_request request = {
+  .scope = "chat-1", .query = "Ciao!",
+  .base_system_prompt = "You are a helpful assistant.",
+  .history_tokens = 2048, .checkpoint_tokens = 1024
+};
+asper_context_pack context;
+asper_context_materialize(ctx, &request, &context);
+/* ... run your model with `context.system_prompt` + `context.context_text` ... */
+asper_context_pack_free(&context);
 asper_close(ctx);
 ```
 
@@ -126,7 +138,7 @@ the public struct.
 asper-mcp --root ./memory [--config config.xcdn]
 ```
 
-Tools: `memory_search`, `memory_recall`, `memory_insert`, `memory_update`, `memory_deprecate`, `memory_list`, `project_select`, `project_list`, `observe_turn`, `context_build`, `memory_stats`.
+Tools: `memory_search`, `memory_recall`, `memory_insert`, `memory_update`, `memory_deprecate`, `memory_list`, `project_select`, `project_list`, `source_append`, `context_materialize`, `memory_stats`.
 
 ## Agent Plugin
 

@@ -125,7 +125,8 @@ static asper_err register_local(asper_ctx *c) {
   curator.base_url = c->cfg.curator_base_url;
   curator.remote_model = c->cfg.curator_remote_model;
   curator.api_key_env = c->cfg.curator_api_key_env;
-  curator.api_grammar = c->cfg.curator_api_grammar;
+  curator.remote_provider =
+      (asmodel_remote_provider)c->cfg.curator_remote_provider;
   curator.context_tokens = c->cfg.curator_ctx;
   curator.threads = c->cfg.curator_threads;
   curator.gpu_layers = c->cfg.curator_gpu_layers;

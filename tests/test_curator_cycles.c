@@ -29,8 +29,10 @@ static asper_ctx *open_store(const char *root, const char *config) {
 /* One deterministic curation cycle: two observed turns (below the default
  * turn_batch of 4, so the worker stays idle) then a forced flush. */
 static int run_cycle(asper_ctx *c, const char *user_text) {
-  if (asper_observe_turn(c, ASPER_ROLE_USER, user_text) != ASPER_OK) return 0;
-  if (asper_observe_turn(c, ASPER_ROLE_ASSISTANT, "ok noted") != ASPER_OK)
+  if (fake_event_append(c, "test", ASPER_EVENT_USER, user_text) != ASPER_OK)
+    return 0;
+  if (fake_event_append(c, "test", ASPER_EVENT_ASSISTANT, "ok noted") !=
+      ASPER_OK)
     return 0;
   return asper_flush(c, 1) == ASPER_OK;
 }
@@ -61,11 +63,11 @@ TEST(scripted_insert_applied) {
   ASSERT_TRUE(
       fake_curator_push(&g_cur, "INSERT context | The user drinks green tea\n"));
   /* a full turn_batch (4) plus the flush: exactly one cycle consumes it */
-  ASSERT_OK(asper_observe_turn(c, ASPER_ROLE_USER,
-                               "i drink green tea every day"));
-  ASSERT_OK(asper_observe_turn(c, ASPER_ROLE_ASSISTANT, "ok noted"));
-  ASSERT_OK(asper_observe_turn(c, ASPER_ROLE_USER, "thanks"));
-  ASSERT_OK(asper_observe_turn(c, ASPER_ROLE_ASSISTANT, "sure"));
+  ASSERT_OK(fake_event_append(c, "test", ASPER_EVENT_USER,
+                              "i drink green tea every day"));
+  ASSERT_OK(fake_event_append(c, "test", ASPER_EVENT_ASSISTANT, "ok noted"));
+  ASSERT_OK(fake_event_append(c, "test", ASPER_EVENT_USER, "thanks"));
+  ASSERT_OK(fake_event_append(c, "test", ASPER_EVENT_ASSISTANT, "sure"));
   ASSERT_OK(asper_flush(c, 1));
 
   ASSERT_OK(asper_get_stats(c, &st));
@@ -78,6 +80,9 @@ TEST(scripted_insert_applied) {
   ASSERT_EQ_INT(n, 1);
   ASSERT_EQ_STR(asper_record_content(out[0]), "The user drinks green tea");
   ASSERT_EQ_STR(asper_record_source(out[0]), "curator");
+  ASSERT_EQ_INT(asper_record_source_ref_count(out[0]), 4);
+  ASSERT_TRUE(asper_record_source_ref(out[0], 0) != NULL);
+  ASSERT_TRUE(asper_record_source_ref(out[0], 4) == NULL);
   ASSERT_EQ_DBL(asper_record_relevance(out[0]), 0.60, 1e-9);
   asper_records_free(out, n);
   /* index: the new record is retrievable by similarity */
@@ -94,6 +99,7 @@ TEST(scripted_insert_applied) {
   section_file = asper_test_read_file(path, NULL);
   ASSERT_TRUE(section_file != NULL);
   ASSERT_TRUE(strstr(section_file, "The user drinks green tea") != NULL);
+  ASSERT_TRUE(strstr(section_file, "source_refs") != NULL);
   free(section_file);
   /* the curator saw instruction, transcript and empty-memory marker */
   ASSERT_TRUE(g_cur.calls >= 1);
@@ -148,8 +154,9 @@ TEST(transient_generation_failure_retains_turns) {
   ASSERT_TRUE(fake_curator_push(&g_cur,
                                 "INSERT context | Retried fact survives\n"));
   fake_curator_fail_next(&g_cur, ASPER_ERR_MODEL);
-  ASSERT_OK(asper_observe_turn(c, ASPER_ROLE_USER, "remember this fact"));
-  ASSERT_OK(asper_observe_turn(c, ASPER_ROLE_ASSISTANT, "noted"));
+  ASSERT_OK(fake_event_append(c, "test", ASPER_EVENT_USER,
+                              "remember this fact"));
+  ASSERT_OK(fake_event_append(c, "test", ASPER_EVENT_ASSISTANT, "noted"));
   ASSERT_ERR(asper_flush(c, 1), ASPER_ERR_MODEL);
   ASSERT_OK(asper_get_stats(c, &st));
   ASSERT_EQ_INT(st.records_context, 0);
