@@ -749,8 +749,8 @@ asper_err asper_curation_cycle(asper_ctx *c, bool force)
                            CURATOR_CYCLE_MAX_TOKENS, 0, &reply);
   if (rc != ASPER_OK) {
     asper_log(c, ASPER_LOG_ERROR, "curator",
-              "generation failed (%s): retaining %zu turn(s) for retry",
-              asper_err_name(rc), n_turns);
+              "generation failed (%s: %s): retaining %zu turn(s) for retry",
+              asper_err_name(rc), asper_last_error(c), n_turns);
     asper_seterr(c, rc, "curator generation failed");
     goto out;
   }

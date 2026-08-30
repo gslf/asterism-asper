@@ -196,9 +196,11 @@ static asper_err managed_generate(void *ud, const char *sys, const char *user,
   asmodel_generate_params p;
   memset(&p, 0, sizeof p);
   p.max_tokens = max_tokens; p.deadline_ms = deadline_ms;
-  return asmodel_generate(r->manager, r->id, sys, user, grammar, &p,
-                          NULL, NULL, NULL, out, NULL, NULL) == ASMODEL_OK
-             ? ASPER_OK : ASPER_ERR_MODEL;
+  if (asmodel_generate(r->manager, r->id, sys, user, grammar, &p,
+                       NULL, NULL, NULL, out, NULL, NULL) == ASMODEL_OK)
+    return ASPER_OK;
+  return asper_seterr(r->ctx, ASPER_ERR_MODEL, "model '%s': %s", r->id,
+                      asmodel_manager_last_error(r->manager));
 }
 
 static void ref_destroy(void *ud) { free(ud); }

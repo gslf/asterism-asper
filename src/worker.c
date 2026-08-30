@@ -189,6 +189,7 @@ static void worker_maybe_compact(asper_ctx *c) {
 
 static void *asper_worker_main(void *arg) {
   asper_ctx *c = (asper_ctx *)arg;
+  int64_t cycle_retry_ms = 1000;
   /* Last time this thread *attempted* a maintenance review. Guards against
    * a due-loop if a review declines to advance c->last_maintenance (e.g. no
    * candidates); curator.c still applies its own interval gate. */
@@ -224,8 +225,14 @@ static void *asper_worker_main(void *arg) {
       c->cycle_busy = false;
       os_cond_broadcast(&c->done_cv);
       worker_maybe_compact(c);
-      if (cycle_rc != ASPER_OK && !c->stop_worker)
-        (void)os_cond_timedwait(&c->ev_cv, &c->ev_mu, 1000);
+      if (cycle_rc != ASPER_OK && !c->stop_worker) {
+        (void)os_cond_timedwait(&c->ev_cv, &c->ev_mu, cycle_retry_ms);
+        if (cycle_retry_ms < 60000)
+          cycle_retry_ms = cycle_retry_ms > 30000
+                               ? 60000 : cycle_retry_ms * 2;
+      } else {
+        cycle_retry_ms = 1000;
+      }
       continue;
     }
     if (can_work && maint_due) {
