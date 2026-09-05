@@ -99,20 +99,19 @@ void fake_curator_fail_next(fake_curator *fc, asper_err error) {
   if (fc) fc->next_error = error;
 }
 
-void fake_curator_busy_on_deadline(fake_curator *fc, int enabled) {
-  if (fc) fc->busy_on_deadline = enabled != 0;
+void fake_curator_timeout_on_deadline(fake_curator *fc, int enabled) {
+  if (fc) fc->timeout_on_deadline = enabled != 0;
 }
 
 static asper_err fake_curator_generate(void *ud, const char *system_prompt,
                                        const char *user_prompt,
-                                       const char *gbnf, const asper_output_contract *contract, int max_tokens,
-                                       int64_t deadline_ms,
+                                       const char *gbnf, const asper_output_contract *contract,
+                                       const asmodel_generate_params *params, volatile int *cancel,
                                        char **out_text) {
   fake_curator *fc = (fake_curator *)ud;
   const char *reply = "NOOP\n";
   (void)contract;
-  (void)max_tokens;
-  (void)deadline_ms;
+  if (cancel && *cancel) return ASPER_ERR_CANCELLED;
   if (!fc || !out_text) return ASPER_ERR_INVALID;
   free(fc->last_system);
   fc->last_system = asper_strdup(system_prompt);
@@ -126,7 +125,8 @@ static asper_err fake_curator_generate(void *ud, const char *system_prompt,
     fc->next_error = ASPER_OK;
     return error;
   }
-  if (fc->busy_on_deadline && deadline_ms > 0) return ASPER_ERR_BUSY;
+  fc->last_deadline_ms = params->deadline_ms;
+  if (fc->timeout_on_deadline && params->deadline_ms > 0) return ASPER_ERR_TIMEOUT;
   if (fc->next < fc->n) reply = fc->replies[fc->next++];
   *out_text = asper_strdup(reply);
   return *out_text ? ASPER_OK : ASPER_ERR_NOMEM;

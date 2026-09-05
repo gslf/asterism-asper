@@ -14,7 +14,7 @@ typedef struct {
   int kind;
   asper_embedder embedder;
   asper_curator_iface curator;
-} legacy_provider;
+} native_provider;
 
 typedef struct {
   asmodel_manager *manager;
@@ -30,6 +30,10 @@ static int model_error(asper_err e) {
     case ASPER_ERR_CANCELLED: return ASMODEL_ERR_CANCELLED;
     case ASPER_ERR_LIMIT: return ASMODEL_ERR_LIMIT;
     case ASPER_ERR_NOMEM: return ASMODEL_ERR_NOMEM;
+    case ASPER_ERR_INVALID: return ASMODEL_ERR_INVALID;
+    case ASPER_ERR_BUSY: return ASMODEL_ERR_BUSY;
+    case ASPER_ERR_NOT_FOUND: return ASMODEL_ERR_NOT_FOUND;
+    case ASPER_ERR_UNSUPPORTED: return ASMODEL_ERR_UNSUPPORTED;
     default: return ASMODEL_ERR_BACKEND;
   }
 }
@@ -40,32 +44,35 @@ static asper_err memory_error(asmodel_err e) {
     case ASMODEL_ERR_CANCELLED: return ASPER_ERR_CANCELLED;
     case ASMODEL_ERR_LIMIT: return ASPER_ERR_LIMIT;
     case ASMODEL_ERR_NOMEM: return ASPER_ERR_NOMEM;
+    case ASMODEL_ERR_INVALID: return ASPER_ERR_INVALID;
+    case ASMODEL_ERR_BUSY: return ASPER_ERR_BUSY;
+    case ASMODEL_ERR_NOT_FOUND: return ASPER_ERR_NOT_FOUND;
+    case ASMODEL_ERR_UNSUPPORTED: return ASPER_ERR_UNSUPPORTED;
     default: return ASPER_ERR_MODEL;
   }
 }
 
-static int legacy_generate(void *ud, const char *sys, const char *user,
+static int native_generate(void *ud, const char *sys, const char *user,
                            const char *grammar,
                            const asmodel_generate_params *params,
                            asmodel_token_fn token_fn, void *token_ud,
                            volatile int *cancel, char **out,
                            int *out_in, int *out_gen) {
-  legacy_provider *p = (legacy_provider *)ud;
+  native_provider *p = (native_provider *)ud;
   asper_err e;
-  if (cancel && *cancel) return ASMODEL_ERR_CANCELLED;
-  e = p->curator.generate(p->curator.ud, sys, user, grammar, NULL,
-                          params->max_tokens, params->deadline_ms, out);
-  if (e != ASPER_OK) return model_error(e);
-  if (out_in) *out_in = 0;
-  if (out_gen) *out_gen = p->curator.count_tokens && *out ?
-      p->curator.count_tokens(p->curator.ud, *out) : 0;
-  if (token_fn && *out) token_fn(*out, strlen(*out), token_ud);
-  return 0;
+  asmodel_generate_params request = *params;
+  asmodel_generation_info local = {0};
+  if (!request.result_info) request.result_info = &local;
+  e = p->curator.generate(p->curator.ud,sys,user,grammar,NULL,&request,cancel,out);
+  if (out_in) *out_in = request.result_info->input_tokens;
+  if (out_gen) *out_gen = request.result_info->output_tokens;
+  if (token_fn && *out) token_fn(*out,strlen(*out),token_ud);
+  return model_error(e);
 }
 
-static int legacy_embed(void *ud, const char *const *texts, size_t count, int is_query,
+static int native_embed(void *ud, const char *const *texts, size_t count, int is_query,
                         const asmodel_embed_params *params, float *out) {
-  legacy_provider *p = ud;
+  native_provider *p = ud;
   int64_t started = os_monotonic_ms();
   asmodel_embedding_info total = {0}; total.usage_known = 1;
   int result = ASMODEL_OK;
@@ -87,14 +94,14 @@ static int legacy_embed(void *ud, const char *const *texts, size_t count, int is
   return result;
 }
 
-static int legacy_count(void *ud, const char *text) {
-  legacy_provider *p = (legacy_provider *)ud;
+static int native_count(void *ud, const char *text) {
+  native_provider *p = (native_provider *)ud;
   return p->curator.count_tokens ?
       p->curator.count_tokens(p->curator.ud, text) : -1;
 }
 
-static void legacy_destroy(void *ud) {
-  legacy_provider *p = (legacy_provider *)ud;
+static void native_destroy(void *ud) {
+  native_provider *p = (native_provider *)ud;
   if (!p) return;
   if (p->kind == 1 && p->embedder.destroy)
     p->embedder.destroy(p->embedder.ud);
@@ -107,11 +114,11 @@ static int manager_loader(void *ud, const asmodel_spec *spec,
                           asmodel_provider *out, char *error,
                           size_t error_size) {
   asper_ctx *c = (asper_ctx *)ud;
-  legacy_provider *p;
+  native_provider *p;
   asper_err e;
   if (spec->backend == ASMODEL_BACKEND_OPENAI)
     return asmodel_openai_provider_create(spec, out, error, error_size);
-  p = (legacy_provider *)calloc(1, sizeof *p);
+  p = (native_provider *)calloc(1, sizeof *p);
   if (!p) return -1;
   p->ctx = c;
   memset(out, 0, sizeof *out);
@@ -121,22 +128,22 @@ static int manager_loader(void *ud, const asmodel_spec *spec,
     if (e == ASPER_OK && p->embedder.dim != spec->embedding_dim)
       e = asper_seterr(c,ASPER_ERR_CONFIG,"embedding dimension %d differs from configured %d",
                        p->embedder.dim,spec->embedding_dim);
-    if (e == ASPER_OK) out->embed = legacy_embed;
+    if (e == ASPER_OK) out->embed = native_embed;
   } else {
     p->kind = 2;
     e = asper_curator_llama_create(c, &p->curator);
     if (e == ASPER_OK) {
-      out->generate = legacy_generate;
-      out->count_tokens = legacy_count;
+      out->generate = native_generate;
+      out->count_tokens = native_count;
     }
   }
   if (e != ASPER_OK) {
     snprintf(error, error_size, "%s", asper_last_error(c));
-    legacy_destroy(p);
+    native_destroy(p);
     return -1;
   }
   out->userdata = p;
-  out->destroy = legacy_destroy;
+  out->destroy = native_destroy;
   return 0;
 }
 
@@ -239,21 +246,21 @@ static int managed_count(void *ud, const char *text) {
 }
 
 static asper_err managed_generate(void *ud, const char *sys, const char *user,
-                                  const char *grammar, const asper_output_contract *contract, int max_tokens,
-                                  int64_t deadline_ms, char **out) {
+                                  const char *grammar, const asper_output_contract *contract,
+                                  const asmodel_generate_params *params, volatile int *cancel, char **out) {
   model_ref *r = (model_ref *)ud;
-  asmodel_generate_params p = {0};
-  asmodel_generation_info info = {0};
+  asmodel_generate_params p = *params;
+  asmodel_generation_info local = {0};
+  asmodel_generation_info *info = p.result_info ? p.result_info : &local;
   char *schema = contract ? asper_output_schema(contract) : NULL;
   if (contract && !schema) return ASPER_ERR_NOMEM;
-  p.max_tokens = max_tokens; p.deadline_ms = deadline_ms;
   p.output_schema = schema; p.require_constraint = grammar != NULL || schema != NULL;
-  p.result_info = &info;
+  p.result_info = info;
   asmodel_err e = asmodel_generate(r->manager, r->id, sys, user, grammar, &p,
-                                   NULL, NULL, NULL, out, NULL, NULL);
+                                   NULL, NULL, cancel, out, NULL, NULL);
   free(schema);
-  if (e == ASMODEL_OK) return info.json_output ? asper_output_decode(out) : ASPER_OK;
-  return asper_seterr(r->ctx,memory_error(e),"model '%s': %s",r->id,info.error);
+  if (e == ASMODEL_OK) return info->json_output ? asper_output_decode(out) : ASPER_OK;
+  return asper_seterr(r->ctx,memory_error(e),"model '%s': %s",r->id,info->error);
 
 }
 

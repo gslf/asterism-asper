@@ -28,8 +28,8 @@ extern "C" {
 #endif
 
 #define ASPER_VERSION_MAJOR 0
-#define ASPER_VERSION_MINOR 5
-#define ASPER_ABI_VERSION 5
+#define ASPER_VERSION_MINOR 6
+#define ASPER_ABI_VERSION 6
 #define ASPER_VERSION_PATCH 0
 
 /* Returns "major.minor.patch". */
@@ -48,11 +48,12 @@ typedef enum {
   ASPER_ERR_NOT_FOUND, /* unknown id / project / no recall answer           */
   ASPER_ERR_LOCKED,    /* operation rejected on a locked record             */
   ASPER_ERR_INVALID,   /* invalid argument or state                         */
-  ASPER_ERR_BUSY,      /* timeout / worker unavailable                      */
+  ASPER_ERR_BUSY,      /* worker unavailable                                */
   ASPER_ERR_NOMEM,     /* allocation failure                                */
   ASPER_ERR_TIMEOUT,   /* request deadline expired                          */
   ASPER_ERR_CANCELLED, /* request cancelled                                 */
-  ASPER_ERR_LIMIT      /* input/output or resource budget exceeded          */
+  ASPER_ERR_LIMIT,     /* input/output or resource budget exceeded          */
+  ASPER_ERR_UNSUPPORTED /* backend cannot provide the requested capability   */
 } asper_err;
 
 /* Stable name of an error code, e.g. "ASPER_ERR_IO". */

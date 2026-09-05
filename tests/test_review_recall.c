@@ -271,12 +271,13 @@ TEST(recall_passes_generation_deadline) {
   ASSERT_TRUE(c != NULL);
   ASSERT_OK(asper_memory_insert(c, ASPER_SECTION_CONTEXT, NULL,
                                 "The user speaks Italian", 0, id));
-  fake_curator_busy_on_deadline(&g_cur, 1);
+  fake_curator_timeout_on_deadline(&g_cur, 1);
   ASSERT_ERR(asper_recall(c, "what language does the user speak", &answer,
                           NULL, NULL),
-             ASPER_ERR_BUSY);
+             ASPER_ERR_TIMEOUT);
   ASSERT_TRUE(answer == NULL);
   ASSERT_TRUE(strstr(asper_last_error(c), "timed out") != NULL);
+  ASSERT_TRUE(g_cur.last_deadline_ms > 0 && g_cur.last_deadline_ms <= c->cfg.recall_timeout_s*1000);
   asper_close(c);
   fake_curator_dispose(&g_cur);
   asper_test_rmtree(root);

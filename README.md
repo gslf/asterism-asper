@@ -167,7 +167,7 @@ batch receipts, cancellation and remaining duration. Existing public memory
 operations use the configured recall timeout unless an internal caller supplies
 more specific controls; turn-wide cancellation propagation is still separate.
 
-### Grounded memory (ABI 5)
+### Grounded memory
 
 [Grounding and correction history](docs/knowledge.md) binds exact source spans,
 versioned dependencies and support/contradiction/correction links to claim hashes.
@@ -182,3 +182,9 @@ contract, not a claim that referenced text is necessarily true.
 backup validation, sync policy, quotas and fault tests. Complete corruption and
 uncertain durability fail closed. Old store versions require deliberate conversion;
 there is no automatic migration or compatibility path.
+
+Recall reports deadline expiry as `ASPER_ERR_TIMEOUT`. Its absolute operation
+deadline becomes a remaining duration after retrieval and prompt construction.
+Shared and embedded model adapters preserve request-local consumption, partial
+output and cancellation. Unsupported model contracts return
+`ASPER_ERR_UNSUPPORTED` (ABI 6), rather than a generic busy result.

@@ -45,7 +45,8 @@ typedef struct {
   char *last_grammar; /* copy of the most recent GBNF (or NULL) */
   int calls;          /* generate() invocations                 */
   asper_err next_error; /* one-shot failure injection           */
-  int busy_on_deadline; /* return BUSY when a deadline is passed */
+  int timeout_on_deadline; /* return TIMEOUT when a duration is supplied */
+  int64_t last_deadline_ms;
 } fake_curator;
 
 void fake_curator_init(fake_curator *fc);
@@ -53,7 +54,7 @@ void fake_curator_dispose(fake_curator *fc);
 /* Queue one scripted reply (copied). 1 = ok, 0 = out of memory. */
 int fake_curator_push(fake_curator *fc, const char *reply);
 void fake_curator_fail_next(fake_curator *fc, asper_err error);
-void fake_curator_busy_on_deadline(fake_curator *fc, int enabled);
+void fake_curator_timeout_on_deadline(fake_curator *fc, int enabled);
 asper_curator_iface fake_curator_iface_make(fake_curator *fc);
 
 typedef struct {

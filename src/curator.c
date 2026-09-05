@@ -766,8 +766,8 @@ asper_err asper_curation_cycle(asper_ctx *c, bool force)
 
   instr = load_instruction(c, &instr_heap);
   asper_output_contract contract = {ASPER_GRAMMAR_CURATION, n_handles, c->cfg.content_max_chars};
-  rc = c->curator.generate(c->curator.ud, instr, prompt, gbnf, &contract,
-                           CURATOR_CYCLE_MAX_TOKENS, 0, &reply);
+  asmodel_generate_params params = {.max_tokens=CURATOR_CYCLE_MAX_TOKENS};
+  rc = c->curator.generate(c->curator.ud,instr,prompt,gbnf,&contract,&params,NULL,&reply);
   if (rc != ASPER_OK) {
     asper_log(c, ASPER_LOG_ERROR, "curator",
               "generation failed (%s: %s): retaining %zu turn(s) for retry",
@@ -1020,8 +1020,8 @@ asper_err asper_maintenance_review(asper_ctx *c, bool force)
   }
 
   asper_output_contract contract = {ASPER_GRAMMAR_REVIEW, n_cands, c->cfg.content_max_chars};
-  rc = c->curator.generate(c->curator.ud, ASPER_REVIEW_INSTRUCTION, prompt,
-                           gbnf, &contract, CURATOR_REVIEW_MAX_TOKENS, 0, &reply);
+  asmodel_generate_params params = {.max_tokens=CURATOR_REVIEW_MAX_TOKENS};
+  rc = c->curator.generate(c->curator.ud,ASPER_REVIEW_INSTRUCTION,prompt,gbnf,&contract,&params,NULL,&reply);
   if (rc != ASPER_OK) {
     asper_log(c, ASPER_LOG_ERROR, "curator", "review generation failed (%s)",
               asper_err_name(rc));
@@ -1195,9 +1195,12 @@ asper_err asper_recall_run_project(asper_ctx *c, const char *question,
   }
 
   asper_output_contract contract = {ASPER_GRAMMAR_RECALL, n_cands, c->cfg.content_max_chars};
-  rc = c->curator.generate(c->curator.ud, ASPER_RECALL_INSTRUCTION, prompt,
-                           gbnf, &contract, c->cfg.recall_answer_tokens, deadline_ms,
-                           &reply);
+  asmodel_generate_params params = {.max_tokens=c->cfg.recall_answer_tokens};
+  if (deadline_ms > 0) {
+    params.deadline_ms = deadline_ms-os_monotonic_ms();
+    if (params.deadline_ms <= 0) { rc = ASPER_ERR_TIMEOUT; goto out; }
+  }
+  rc = c->curator.generate(c->curator.ud,ASPER_RECALL_INSTRUCTION,prompt,gbnf,&contract,&params,NULL,&reply);
   if (rc != ASPER_OK) {
     asper_log(c, ASPER_LOG_ERROR, "recall", "generation failed (%s)",
               asper_err_name(rc));

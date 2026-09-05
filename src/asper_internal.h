@@ -497,7 +497,8 @@ typedef struct {
    * not assume thread affinity. */
   asper_err (*generate)(void *ud, const char *system_prompt,
                         const char *user_prompt, const char *gbnf,
-                        const asper_output_contract *contract, int max_tokens, int64_t deadline_ms,
+                        const asper_output_contract *contract,
+                        const asmodel_generate_params *params, volatile int *cancel,
                         char **out_text);
   /* Token count with the curator tokenizer; <0 on error. Any thread. */
   int (*count_tokens)(void *ud, const char *text);

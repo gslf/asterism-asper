@@ -42,6 +42,7 @@ const char *asper_err_name(asper_err e) {
   case ASPER_ERR_TIMEOUT: return "ASPER_ERR_TIMEOUT";
   case ASPER_ERR_CANCELLED: return "ASPER_ERR_CANCELLED";
   case ASPER_ERR_LIMIT: return "ASPER_ERR_LIMIT";
+  case ASPER_ERR_UNSUPPORTED: return "ASPER_ERR_UNSUPPORTED";
   default: return "ASPER_ERR_UNKNOWN";
   }
 }
@@ -1017,7 +1018,7 @@ asper_err asper_recall_project(asper_ctx *c, const char *question,
   if (c->no_threads) {
     e = asper_recall_run_project(c, question, project, deadline, out_answer, out_cited,
                          out_cited_n);
-    if (e == ASPER_ERR_BUSY)
+    if (e == ASPER_ERR_TIMEOUT)
       return asper_seterr(c, e, "recall timed out after %lld s",
                           (long long)c->cfg.recall_timeout_s);
     return e;
@@ -1028,12 +1029,13 @@ asper_err asper_recall_project(asper_ctx *c, const char *question,
     os_mutex_lock(&c->ev_mu);
     c->recall_waiting++;
     while (c->cycle_busy) {
+      if (!deadline) { os_cond_wait(&c->done_cv,&c->ev_mu); continue; }
       int64_t rem = deadline - os_monotonic_ms();
       if (rem <= 0) {
         c->recall_waiting--;
         os_cond_signal(&c->ev_cv); /* let the worker resume */
         os_mutex_unlock(&c->ev_mu);
-        return asper_seterr(c, ASPER_ERR_BUSY, "recall timed out after %lld s",
+        return asper_seterr(c, ASPER_ERR_TIMEOUT, "recall timed out after %lld s",
                             (long long)c->cfg.recall_timeout_s);
       }
       (void)os_cond_timedwait(&c->done_cv, &c->ev_mu, rem);
@@ -1052,7 +1054,7 @@ asper_err asper_recall_project(asper_ctx *c, const char *question,
   os_cond_broadcast(&c->done_cv);
   os_cond_signal(&c->ev_cv);
   os_mutex_unlock(&c->ev_mu);
-  if (e == ASPER_ERR_BUSY)
+  if (e == ASPER_ERR_TIMEOUT)
     return asper_seterr(c, e, "recall timed out after %lld s",
                         (long long)c->cfg.recall_timeout_s);
   return e;

@@ -57,7 +57,16 @@ typedef struct {
   bool kv_cache;
   llama_token *cached_prompt;
   int32_t cached_prompt_n;
+  volatile int *cancel;
+  int64_t deadline;
 } cll_ud;
+
+static asper_err cll_control(const cll_ud *u) {
+  if (u->cancel && *u->cancel) return ASPER_ERR_CANCELLED;
+  if (u->deadline > 0 && os_monotonic_ms() >= u->deadline) return ASPER_ERR_TIMEOUT;
+  return ASPER_OK;
+}
+static bool cll_abort(void *ud) { return cll_control(ud) != ASPER_OK; }
 
 /* Tokenize text into a malloc'd array using the negative-return resize
  * convention. *out_tok is NULL when the text yields zero tokens. */
@@ -162,8 +171,8 @@ static asper_err cll_apply_template(const char *tmpl,
 
 static asper_err cll_generate(void *ud, const char *system_prompt,
                               const char *user_prompt, const char *gbnf,
-                              const asper_output_contract *contract, int max_tokens, int64_t deadline_ms,
-                              char **out_text)
+                              const asper_output_contract *contract,
+                              const asmodel_generate_params *params, volatile int *cancel, char **out_text)
 {
   (void)contract;
   cll_ud *u = (cll_ud *)ud;
@@ -176,10 +185,25 @@ static asper_err cll_generate(void *ud, const char *system_prompt,
   asper_buf outbuf;
   asper_err e;
   int32_t i, n_past;
-  int produced, limit;
+  int produced = 0, limit;
+  bool hit_eog = false, constrained = false;
+  asmodel_generation_info local = {0};
+  asmodel_generation_info *info = params->result_info ? params->result_info : &local;
+  memset(info,0,sizeof *info); info->usage_known = 1;
 
   *out_text = NULL;
   asper_buf_init(&outbuf);
+  int64_t started = os_monotonic_ms();
+  u->cancel = cancel;
+  u->deadline = params->deadline_ms <= 0 ? 0 : params->deadline_ms > INT64_MAX-started ?
+      INT64_MAX : started+params->deadline_ms;
+  e = cll_control(u);
+  if (e != ASPER_OK) goto out;
+  if ((params->require_constraint && !gbnf) || params->reasoning == ASMODEL_REASONING_REQUIRED_ON ||
+      params->reasoning == ASMODEL_REASONING_BUDGETED ||
+      (params->reasoning == ASMODEL_REASONING_REQUIRED_OFF && !gbnf)) {
+    e = ASPER_ERR_UNSUPPORTED; goto out;
+  }
 
   e = cll_apply_template(u->chat_template,
                          system_prompt != NULL ? system_prompt : "",
@@ -228,6 +252,7 @@ static asper_err cll_generate(void *ud, const char *system_prompt,
       goto out;
     }
     llama_sampler_chain_add(chain, grammar);
+    constrained = true;
   }
   greedy = llama_sampler_init_greedy();
   if (greedy == NULL) {
@@ -237,33 +262,31 @@ static asper_err cll_generate(void *ud, const char *system_prompt,
   llama_sampler_chain_add(chain, greedy);
 
   for (i = prompt_start; i < n_tok; i += u->n_batch) {
-    if (deadline_ms > 0 && os_monotonic_ms() >= deadline_ms) {
-      e = ASPER_ERR_BUSY;
+    if (cll_control(u) != ASPER_OK) {
+      e = cll_control(u);
       goto out;
     }
     int32_t chunk = n_tok - i < u->n_batch ? n_tok - i : u->n_batch;
     struct llama_batch batch = llama_batch_get_one(tok + i, chunk);
     if (asper_llg_decode(u->lctx, batch) != 0) {
-      e = ASPER_ERR_MODEL;
+      e = cll_control(u); if (e == ASPER_OK) e = ASPER_ERR_MODEL;
       goto out;
     }
   }
 
-  limit = max_tokens > 0 ? max_tokens : INT_MAX;
+  limit = params->max_tokens > 0 ? params->max_tokens : INT_MAX;
   n_past = n_tok;
   produced = 0;
   while (produced < limit) {
-    if (deadline_ms > 0 && os_monotonic_ms() >= deadline_ms) {
-      e = ASPER_ERR_BUSY;
+    if (cll_control(u) != ASPER_OK) {
+      e = cll_control(u);
       goto out;
     }
     llama_token t;
     if (asper_llg_sampler_sample(chain, u->lctx, -1, &t) != 0) {
-      /* a sampler-side exception ends the generation with what we have */
-      break;
+      e = ASPER_ERR_MODEL; goto out;
     }
-    if (llama_vocab_is_eog(u->vocab, t))
-      break;
+    if (llama_vocab_is_eog(u->vocab, t)) { hit_eog = true; break; }
     e = cll_append_piece(u->vocab, t, &outbuf);
     if (e != ASPER_OK)
       goto out;
@@ -273,7 +296,7 @@ static asper_err cll_generate(void *ud, const char *system_prompt,
     {
       struct llama_batch batch = llama_batch_get_one(&t, 1);
       if (asper_llg_decode(u->lctx, batch) != 0) {
-        e = ASPER_ERR_MODEL;
+        e = cll_control(u); if (e == ASPER_OK) e = ASPER_ERR_MODEL;
         goto out;
       }
     }
@@ -289,8 +312,8 @@ static asper_err cll_generate(void *ud, const char *system_prompt,
     }
     (*out_text)[0] = '\0';
   }
-  e = ASPER_OK;
-  if (u->kv_cache) {
+  e = hit_eog ? ASPER_OK : ASPER_ERR_LIMIT;
+  if (u->kv_cache && e == ASPER_OK) {
     llama_token *cached =
         (llama_token *)malloc((size_t)n_tok * sizeof *cached);
     if (cached) {
@@ -302,6 +325,14 @@ static asper_err cll_generate(void *ud, const char *system_prompt,
   }
 
 out:
+  u->cancel = NULL; u->deadline = 0;
+  if (!*out_text && outbuf.len) *out_text = asper_buf_detach(&outbuf);
+  info->input_tokens = n_tok; info->output_tokens = produced; info->cached_input_tokens = prompt_start;
+  info->usage_known = !n_tok || e == ASPER_OK || e == ASPER_ERR_LIMIT;
+  info->finish_reason = e == ASPER_OK ? ASMODEL_FINISH_STOP : e == ASPER_ERR_LIMIT ?
+      ASMODEL_FINISH_LENGTH : e == ASPER_ERR_CANCELLED ? ASMODEL_FINISH_CANCELLED : ASMODEL_FINISH_ERROR;
+  if (constrained) info->applied |= ASMODEL_APPLIED_CONSTRAINT;
+  if (e != ASPER_OK) snprintf(info->error,sizeof info->error,"%s",asper_err_name(e));
   if (chain != NULL)
     llama_sampler_free(chain);
   free(tok);
@@ -396,6 +427,7 @@ asper_err asper_curator_llama_create(asper_ctx *c, asper_curator_iface *out)
   cparams.n_ubatch = CLL_N_BATCH;
   cparams.n_threads = threads;
   cparams.n_threads_batch = threads;
+  cparams.abort_callback = cll_abort; cparams.abort_callback_data = u;
 
   u->lctx = llama_init_from_model(u->model, cparams);
   if (u->lctx == NULL) {
