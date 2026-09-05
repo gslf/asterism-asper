@@ -103,11 +103,12 @@ void fake_curator_timeout_on_deadline(fake_curator *fc, int enabled) {
   if (fc) fc->timeout_on_deadline = enabled != 0;
 }
 
-static asper_err fake_curator_generate(void *ud, const char *system_prompt,
-                                       const char *user_prompt,
+static asper_err fake_curator_generate(void *ud, const asmodel_input *input,
                                        const char *gbnf, const asper_output_contract *contract,
                                        const asmodel_generate_params *params, volatile int *cancel,
                                        char **out_text) {
+  const char *system_prompt = input->messages[0].blocks[0].text;
+  const char *user_prompt = input->messages[1].blocks[0].text;
   fake_curator *fc = (fake_curator *)ud;
   const char *reply = "NOOP\n";
   (void)contract;

@@ -131,46 +131,32 @@ static asper_err cll_append_piece(const struct llama_vocab *vocab,
   return e;
 }
 
-/* Render system + user through the chat template with the assistant
- * prompt appended, using the negative-return / resize-and-retry
- * convention. Unsupported model templates fall back to chatml (tmpl
- * NULL). *out is malloc'd. */
-static asper_err cll_apply_template(const char *tmpl,
-                                    const char *system_prompt,
-                                    const char *user_prompt, char **out)
-{
-  struct llama_chat_message msgs[2];
-  int32_t need, got;
-  char *buf;
-
-  msgs[0].role = "system";
-  msgs[0].content = system_prompt;
-  msgs[1].role = "user";
-  msgs[1].content = user_prompt;
-
-  need = asper_llg_chat_apply_template(tmpl, msgs, 2, true, NULL, 0);
-  if (need < 0 && tmpl != NULL) {
-    tmpl = NULL; /* chatml fallback */
-    need = asper_llg_chat_apply_template(tmpl, msgs, 2, true, NULL, 0);
+/* Template rendering preserves roles; this C backend accepts text blocks only. */
+static asper_err cll_apply_template(const char *tmpl, const asmodel_input *input, char **out) {
+  struct llama_chat_message messages[256];
+  char *content[256] = {0};
+  asper_err e = ASPER_ERR_UNSUPPORTED;
+  *out = NULL;
+  if (asmodel_input_validate(input) != ASMODEL_OK) return ASPER_ERR_INVALID;
+  for (size_t i = 0; i < input->count; i++) {
+    asmodel_err result = asmodel_message_text(&input->messages[i],&content[i]);
+    if (result != ASMODEL_OK) { e = result == ASMODEL_ERR_NOMEM ? ASPER_ERR_NOMEM : ASPER_ERR_UNSUPPORTED; goto done; }
+    messages[i].role = asmodel_role_name(input->messages[i].role);
+    messages[i].content = content[i];
   }
-  if (need < 0)
-    return ASPER_ERR_MODEL;
-  buf = (char *)malloc((size_t)need + 1);
-  if (buf == NULL)
-    return ASPER_ERR_NOMEM;
-  got = asper_llg_chat_apply_template(tmpl, msgs, 2, true, buf,
-                                      (int32_t)(need + 1));
-  if (got < 0 || got > need) {
-    free(buf);
-    return ASPER_ERR_MODEL;
-  }
-  buf[got] = '\0';
-  *out = buf;
-  return ASPER_OK;
+  int32_t need = asper_llg_chat_apply_template(tmpl,messages,input->count,true,NULL,0);
+  if (need < 0 || need == INT32_MAX) goto done;
+  char *buf = malloc((size_t)need+1);
+  if (!buf) { e = ASPER_ERR_NOMEM; goto done; }
+  int32_t got = asper_llg_chat_apply_template(tmpl,messages,input->count,true,buf,need+1);
+  if (got < 0 || got > need) { free(buf); goto done; }
+  buf[got] = 0; *out = buf; e = ASPER_OK;
+done:
+  for (size_t i = 0; i < input->count; i++) free(content[i]);
+  return e;
 }
 
-static asper_err cll_generate(void *ud, const char *system_prompt,
-                              const char *user_prompt, const char *gbnf,
+static asper_err cll_generate(void *ud, const asmodel_input *input, const char *gbnf,
                               const asper_output_contract *contract,
                               const asmodel_generate_params *params, volatile int *cancel, char **out_text)
 {
@@ -199,6 +185,7 @@ static asper_err cll_generate(void *ud, const char *system_prompt,
       INT64_MAX : started+params->deadline_ms;
   e = cll_control(u);
   if (e != ASPER_OK) goto out;
+  if (params->tools) { e = ASPER_ERR_UNSUPPORTED; goto out; }
   if ((params->require_constraint && !gbnf) || params->reasoning == ASMODEL_REASONING_REQUIRED_ON ||
       params->reasoning == ASMODEL_REASONING_BUDGETED ||
       (params->reasoning == ASMODEL_REASONING_REQUIRED_OFF && !gbnf)) {
@@ -206,8 +193,7 @@ static asper_err cll_generate(void *ud, const char *system_prompt,
   }
 
   e = cll_apply_template(u->chat_template,
-                         system_prompt != NULL ? system_prompt : "",
-                         user_prompt != NULL ? user_prompt : "", &prompt);
+                         input, &prompt);
   if (e != ASPER_OK)
     goto out;
 

@@ -767,7 +767,8 @@ asper_err asper_curation_cycle(asper_ctx *c, bool force)
   instr = load_instruction(c, &instr_heap);
   asper_output_contract contract = {ASPER_GRAMMAR_CURATION, n_handles, c->cfg.content_max_chars};
   asmodel_generate_params params = {.max_tokens=CURATOR_CYCLE_MAX_TOKENS};
-  rc = c->curator.generate(c->curator.ud,instr,prompt,gbnf,&contract,&params,NULL,&reply);
+  asmodel_text_input input; asmodel_input_pair(&input,instr,prompt);
+  rc = c->curator.generate(c->curator.ud,&input.input,gbnf,&contract,&params,NULL,&reply);
   if (rc != ASPER_OK) {
     asper_log(c, ASPER_LOG_ERROR, "curator",
               "generation failed (%s: %s): retaining %zu turn(s) for retry",
@@ -1021,7 +1022,8 @@ asper_err asper_maintenance_review(asper_ctx *c, bool force)
 
   asper_output_contract contract = {ASPER_GRAMMAR_REVIEW, n_cands, c->cfg.content_max_chars};
   asmodel_generate_params params = {.max_tokens=CURATOR_REVIEW_MAX_TOKENS};
-  rc = c->curator.generate(c->curator.ud,ASPER_REVIEW_INSTRUCTION,prompt,gbnf,&contract,&params,NULL,&reply);
+  asmodel_text_input input; asmodel_input_pair(&input,ASPER_REVIEW_INSTRUCTION,prompt);
+  rc = c->curator.generate(c->curator.ud,&input.input,gbnf,&contract,&params,NULL,&reply);
   if (rc != ASPER_OK) {
     asper_log(c, ASPER_LOG_ERROR, "curator", "review generation failed (%s)",
               asper_err_name(rc));
@@ -1200,7 +1202,8 @@ asper_err asper_recall_run_project(asper_ctx *c, const char *question,
     params.deadline_ms = deadline_ms-os_monotonic_ms();
     if (params.deadline_ms <= 0) { rc = ASPER_ERR_TIMEOUT; goto out; }
   }
-  rc = c->curator.generate(c->curator.ud,ASPER_RECALL_INSTRUCTION,prompt,gbnf,&contract,&params,NULL,&reply);
+  asmodel_text_input input; asmodel_input_pair(&input,ASPER_RECALL_INSTRUCTION,prompt);
+  rc = c->curator.generate(c->curator.ud,&input.input,gbnf,&contract,&params,NULL,&reply);
   if (rc != ASPER_OK) {
     asper_log(c, ASPER_LOG_ERROR, "recall", "generation failed (%s)",
               asper_err_name(rc));

@@ -52,7 +52,7 @@ static asper_err memory_error(asmodel_err e) {
   }
 }
 
-static int native_generate(void *ud, const char *sys, const char *user,
+static int native_generate(void *ud, const asmodel_input *input,
                            const char *grammar,
                            const asmodel_generate_params *params,
                            asmodel_token_fn token_fn, void *token_ud,
@@ -63,7 +63,7 @@ static int native_generate(void *ud, const char *sys, const char *user,
   asmodel_generate_params request = *params;
   asmodel_generation_info local = {0};
   if (!request.result_info) request.result_info = &local;
-  e = p->curator.generate(p->curator.ud,sys,user,grammar,NULL,&request,cancel,out);
+  e = p->curator.generate(p->curator.ud,input,grammar,NULL,&request,cancel,out);
   if (out_in) *out_in = request.result_info->input_tokens;
   if (out_gen) *out_gen = request.result_info->output_tokens;
   if (token_fn && *out) token_fn(*out,strlen(*out),token_ud);
@@ -245,7 +245,7 @@ static int managed_count(void *ud, const char *text) {
   return asmodel_count_tokens(r->manager, r->id, text);
 }
 
-static asper_err managed_generate(void *ud, const char *sys, const char *user,
+static asper_err managed_generate(void *ud, const asmodel_input *input,
                                   const char *grammar, const asper_output_contract *contract,
                                   const asmodel_generate_params *params, volatile int *cancel, char **out) {
   model_ref *r = (model_ref *)ud;
@@ -256,7 +256,7 @@ static asper_err managed_generate(void *ud, const char *sys, const char *user,
   if (contract && !schema) return ASPER_ERR_NOMEM;
   p.output_schema = schema; p.require_constraint = grammar != NULL || schema != NULL;
   p.result_info = info;
-  asmodel_err e = asmodel_generate(r->manager, r->id, sys, user, grammar, &p,
+  asmodel_err e = asmodel_generate(r->manager, r->id, input, grammar, &p,
                                    NULL, NULL, cancel, out, NULL, NULL);
   free(schema);
   if (e == ASMODEL_OK) return info->json_output ? asper_output_decode(out) : ASPER_OK;

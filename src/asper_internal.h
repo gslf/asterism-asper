@@ -495,8 +495,7 @@ typedef struct {
    * the cycle slot (see the protocol below) — but the calling THREAD varies
    * (worker for cycles, host threads for recall/flush), so backends must
    * not assume thread affinity. */
-  asper_err (*generate)(void *ud, const char *system_prompt,
-                        const char *user_prompt, const char *gbnf,
+  asper_err (*generate)(void *ud, const asmodel_input *input, const char *gbnf,
                         const asper_output_contract *contract,
                         const asmodel_generate_params *params, volatile int *cancel,
                         char **out_text);
