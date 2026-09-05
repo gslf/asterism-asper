@@ -762,6 +762,7 @@ asper_err asper_store_apply(asper_ctx *c, asper_op *op) {
       memset(&rec->evidence,0,sizeof rec->evidence);
       rec->evidence.kind=op->declared_update ? ASPER_EVIDENCE_DECLARED : ASPER_EVIDENCE_INFERRED;
       rec->evidence.confidence=op->declared_update ? 1.0 : 0.5;
+      rec->evidence.confidence_kind=ASPER_CONFIDENCE_HEURISTIC;
       rec->evidence.observed_at=op->at;
       rec->evidence.expires_at=op->declared_update ? 0 : expiry ? expiry : op->at+30*86400;
       snprintf(rec->evidence.provenance,sizeof rec->evidence.provenance,

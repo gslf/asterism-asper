@@ -21,6 +21,7 @@ extern void asper_cycle_slot_release(asper_ctx *c);
 #define ASPER_STR2_(x) #x
 #define ASPER_STR_(x) ASPER_STR2_(x)
 
+unsigned asper_abi_version(void) { return ASPER_ABI_VERSION; }
 const char *asper_version(void) {
   return ASPER_STR_(ASPER_VERSION_MAJOR) "." ASPER_STR_(
       ASPER_VERSION_MINOR) "." ASPER_STR_(ASPER_VERSION_PATCH);
@@ -1164,6 +1165,8 @@ asper_err asper_memory_insert_evidenced(asper_ctx *c, asper_section s,
   if (!c) return ASPER_ERR_INVALID;
   if (evidence && (evidence->kind < ASPER_EVIDENCE_DECLARED ||
       evidence->kind > ASPER_EVIDENCE_INFERRED ||
+      evidence->confidence_kind < ASPER_CONFIDENCE_UNKNOWN ||
+      evidence->confidence_kind > ASPER_CONFIDENCE_MEASURED ||
       !(evidence->confidence >= 0 && evidence->confidence <= 1) ||
       !memchr(evidence->provenance, 0, sizeof evidence->provenance) ||
       !memchr(evidence->workspace, 0, sizeof evidence->workspace) ||
@@ -1218,6 +1221,7 @@ asper_err asper_memory_insert_evidenced(asper_ctx *c, asper_section s,
   else {
     r->evidence.kind = ASPER_EVIDENCE_DECLARED;
     r->evidence.confidence = 1.0;
+    r->evidence.confidence_kind = ASPER_CONFIDENCE_HEURISTIC;
     snprintf(r->evidence.provenance, sizeof r->evidence.provenance, "user:manual");
   }
   if (!r->evidence.observed_at) r->evidence.observed_at = now;

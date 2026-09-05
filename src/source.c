@@ -389,6 +389,32 @@ asper_err asper_event_list(asper_ctx *c, const char *scope,
   return ASPER_OK;
 }
 
+asper_err asper_event_search(asper_ctx *c, const char *scope, const char *query,
+                             unsigned long long after, size_t limit,
+                             asper_event **out, size_t *out_n,
+                             unsigned long long *next) {
+  asper_event *all = NULL, *page;
+  size_t n = 0, used = 0;
+  asper_err e;
+  if (!out || !out_n || !next || !query || limit == 0 || limit > 1000)
+    return ASPER_ERR_INVALID;
+  *out = NULL; *out_n = 0; *next = after;
+  e = asper_event_list(c, scope, &all, &n);
+  if (e != ASPER_OK) return e;
+  page = calloc(limit, sizeof *page);
+  if (!page) { asper_events_free(all, n); return ASPER_ERR_NOMEM; }
+  for (size_t i = 0; i < n && used < limit; i++) {
+    if (all[i].sequence <= after) continue;
+    *next = all[i].sequence;
+    if (*query && !strstr(all[i].text, query)) continue;
+    page[used++] = all[i];
+    all[i].text = NULL; /* Transfer ownership of selected exact events. */
+  }
+  asper_events_free(all, n);
+  *out = page; *out_n = used;
+  return ASPER_OK;
+}
+
 asper_err asper_event_set_pinned(asper_ctx *c, const char *scope,
                                  const char *event_id, int pinned) {
   asper_event *events = NULL;

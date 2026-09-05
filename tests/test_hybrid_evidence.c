@@ -37,6 +37,7 @@ TEST(evidence_roundtrip_expiry_and_manual_edit) {
   memset(&ev, 0, sizeof ev);
   ev.kind = ASPER_EVIDENCE_INFERRED;
   ev.confidence = .4;
+  ev.confidence_kind = ASPER_CONFIDENCE_MEASURED;
   ev.observed_at = 1785319920;
   ev.expires_at = 1785319980;
   strcpy(ev.provenance, "tool:test-123");
@@ -58,6 +59,7 @@ TEST(evidence_roundtrip_expiry_and_manual_edit) {
   ASSERT_EQ_INT(n, 1);
   ASSERT_EQ_STR(asper_record_evidence(r[0])->commit, "abc123");
   ASSERT_EQ_DBL(asper_record_evidence(r[0])->confidence, .4, 1e-8);
+  ASSERT_EQ_INT(asper_record_evidence(r[0])->confidence_kind, ASPER_CONFIDENCE_MEASURED);
   asper_records_free(r, n);
   fake_clock_set(&fc, 1785320000);
   ASSERT_OK(asper_memory_search(c, ASPER_SECTION_CONTEXT, NULL,

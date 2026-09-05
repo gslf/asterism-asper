@@ -65,11 +65,12 @@ endif()
 # are registered either way, so they must be buildable to run).
 # Guarded so an embedding host (e.g. asngn) that already provides the xcdn
 # target can add this project via add_subdirectory without a collision.
+set(ASPER_XCDN_DIR "${CMAKE_CURRENT_SOURCE_DIR}/deps/xcdn-c" CACHE PATH "Path to the pinned xcdn source")
 if(NOT TARGET xcdn)
   if(ASPER_BUILD_TESTS)
-    add_subdirectory(deps/xcdn-c)
+    add_subdirectory("${ASPER_XCDN_DIR}" deps/xcdn-c)
   else()
-    add_subdirectory(deps/xcdn-c EXCLUDE_FROM_ALL)
+    add_subdirectory("${ASPER_XCDN_DIR}" deps/xcdn-c EXCLUDE_FROM_ALL)
   endif()
 endif()
 if(MSVC AND TARGET xcdn)

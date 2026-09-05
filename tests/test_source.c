@@ -49,6 +49,17 @@ TEST(event_roundtrip_and_pinning) {
   ASSERT_OK(asper_event_list(c, in.scope, &events, &n));
   ASSERT_EQ_INT(events[0].pinned, 1);
   asper_events_free(events, n);
+  unsigned long long cursor = 0;
+  ASSERT_OK(asper_event_search(c, in.scope, "line", 0, 1, &events, &n, &cursor));
+  ASSERT_EQ_INT(n, 1);
+  ASSERT_EQ_INT(cursor, 1);
+  ASSERT_EQ_INT(events[0].pinned, 1);
+  asper_events_free(events, n);
+  ASSERT_OK(asper_event_search(c, in.scope, "line", cursor, 1, &events, &n, &cursor));
+  ASSERT_EQ_INT(n, 0);
+  asper_events_free(events, n);
+  ASSERT_ERR(asper_event_search(c, in.scope, "", 0, 0, &events, &n, &cursor), ASPER_ERR_INVALID);
+
   asper_close(c);
   fake_curator_dispose(&g_cur);
   asper_test_rmtree(root);

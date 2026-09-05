@@ -28,11 +28,13 @@ extern "C" {
 #endif
 
 #define ASPER_VERSION_MAJOR 0
-#define ASPER_VERSION_MINOR 2
+#define ASPER_VERSION_MINOR 3
+#define ASPER_ABI_VERSION 3
 #define ASPER_VERSION_PATCH 0
 
 /* Returns "major.minor.patch". */
 const char *asper_version(void);
+unsigned asper_abi_version(void);
 
 typedef struct asper_ctx asper_ctx;
 struct asmodel_manager;
@@ -102,6 +104,12 @@ asper_err asper_event_append(asper_ctx *c, const asper_event_input *event,
                              char out_id[37]);
 asper_err asper_event_list(asper_ctx *c, const char *scope,
                            asper_event **out, size_t *out_n);
+/* Exact event search, stable ascending sequence cursor; limit is 1..1000.
+ * The query is a literal UTF-8 substring, not semantic similarity. */
+asper_err asper_event_search(asper_ctx *c, const char *scope, const char *query,
+                             unsigned long long after_sequence, size_t limit,
+                             asper_event **out, size_t *out_n,
+                             unsigned long long *next_sequence);
 asper_err asper_event_set_pinned(asper_ctx *c, const char *scope,
                                  const char *event_id, int pinned);
 void asper_events_free(asper_event *events, size_t n);
@@ -197,8 +205,12 @@ typedef struct asper_record asper_record;
 typedef enum {
   ASPER_EVIDENCE_DECLARED = 0, ASPER_EVIDENCE_OBSERVED, ASPER_EVIDENCE_INFERRED
 } asper_evidence_kind;
+typedef enum {
+  ASPER_CONFIDENCE_UNKNOWN = 0, ASPER_CONFIDENCE_HEURISTIC, ASPER_CONFIDENCE_MEASURED
+} asper_confidence_kind;
 typedef struct {
   asper_evidence_kind kind;
+  asper_confidence_kind confidence_kind;
   double confidence;
   long long observed_at, expires_at; /* Unix seconds; 0 = host default */
   char provenance[256];             /* source URI, tool invocation, or user */

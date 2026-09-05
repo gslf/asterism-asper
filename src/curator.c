@@ -537,6 +537,7 @@ static cycle_op_result cycle_do_insert(asper_ctx *c, const asper_cop *cop,
   if (n_turns) r->evidence=turns[0].evidence;
   r->evidence.kind = ASPER_EVIDENCE_INFERRED;
   r->evidence.confidence = 0.5;
+  r->evidence.confidence_kind = ASPER_CONFIDENCE_HEURISTIC;
   r->evidence.observed_at = now;
   r->evidence.expires_at = now + 30 * 86400;
   snprintf(r->evidence.provenance, sizeof r->evidence.provenance,

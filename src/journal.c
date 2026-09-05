@@ -344,6 +344,7 @@ static xcdn_node_t *record_build_node(const asper_record *r) {
     ok = xobj_put(obj, "source",
                   xcdn_value_string(asper_source_name(r->source)));
   if (ok) ok = xobj_put(obj, "evidence_kind", xcdn_value_int(r->evidence.kind));
+  if (ok) ok = xobj_put(obj, "confidence_kind", xcdn_value_int(r->evidence.confidence_kind));
   if (ok) ok = xobj_put(obj, "confidence", xcdn_value_float(r->evidence.confidence));
   if (ok) ok = xobj_put(obj, "observed_at", xcdn_value_int(r->evidence.observed_at));
   if (ok) ok = xobj_put(obj, "expires_at", xcdn_value_int(r->evidence.expires_at));
@@ -684,6 +685,12 @@ asper_err asper_record_from_node(asper_ctx *c, const void *xcdn_node,
         v->data.floating : (double)v->data.integer;
     if (!(r->evidence.confidence >= 0 && r->evidence.confidence <= 1))
       REC_FAIL("record %s: invalid confidence", r->id);
+  }
+  v = obj_field(obj, "confidence_kind");
+  if (v) {
+    if (v->type != XCDN_VAL_INT || v->data.integer < ASPER_CONFIDENCE_UNKNOWN ||
+        v->data.integer > ASPER_CONFIDENCE_MEASURED) REC_FAIL("invalid confidence kind");
+    r->evidence.confidence_kind = (asper_confidence_kind)v->data.integer;
   }
   { const char *keys[] = {"provenance", "workspace", "commit"};
     char *dst[] = {r->evidence.provenance, r->evidence.workspace, r->evidence.commit};
