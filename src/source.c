@@ -359,7 +359,7 @@ out:
     asper_err qe = asper_enqueue_turn(
         c, event->kind == ASPER_EVENT_ASSISTANT ? ASPER_ROLE_ASSISTANT
                                                 : ASPER_ROLE_USER,
-        event->text, (asper_time)at, id);
+        event->text, (asper_time)at, id, event->scope, event->object_ref);
     if (qe != ASPER_OK)
       asper_log(c, ASPER_LOG_WARN, "source",
                 "durable event %s awaits later curation: %s", id,
@@ -611,8 +611,14 @@ static asper_err append_event_text(asper_buf *b, const asper_event *event) {
 }
 
 asper_err asper_context_materialize(asper_ctx *c,
+    const asper_context_request *request, asper_context_pack *out) {
+  char *project=NULL; asper_err e=asper_project_active(c,&project);
+  if (e==ASPER_OK) e=asper_context_materialize_project(c,request,project,out);
+  free(project);return e;
+}
+asper_err asper_context_materialize_project(asper_ctx *c,
                                     const asper_context_request *request,
-                                    asper_context_pack *out) {
+                                    const char *project, asper_context_pack *out) {
   asper_event *events = NULL;
   size_t n = 0, history_used = 0, included = 0;
   unsigned char *take = NULL;
@@ -622,10 +628,10 @@ asper_err asper_context_materialize(asper_ctx *c,
   if (!c || !request || !out || !scope_valid(request->scope) ||
       !request->query) return ASPER_ERR_INVALID;
   memset(out, 0, sizeof *out);
-  e = asper_memory_render(c,
+  e = asper_memory_render_project(c,
                           request->base_system_prompt
                               ? request->base_system_prompt : "",
-                          request->query, &out->system_prompt);
+                          request->query, project, &out->system_prompt);
   if (e != ASPER_OK) goto fail;
   out->system_tokens = count_tokens(request, out->system_prompt);
   e = asper_event_list(c, request->scope, &events, &n);
@@ -851,7 +857,7 @@ asper_err asper_source_replay_pending(asper_ctx *c) {
       role = events[i].kind == ASPER_EVENT_ASSISTANT ? ASPER_ROLE_ASSISTANT
                                                       : ASPER_ROLE_USER;
       e = asper_enqueue_turn(c, role, events[i].text,
-                             (asper_time)events[i].at, events[i].id);
+                             (asper_time)events[i].at, events[i].id, scope, events[i].object_ref);
       if (e != ASPER_OK) {
         asper_events_free(events, events_n);
         goto out;

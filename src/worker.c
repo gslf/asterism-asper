@@ -131,8 +131,16 @@ asper_err asper_run_due_work(asper_ctx *c, bool force_cycle, bool full) {
     bool use_slot = !c->no_threads;
     if (use_slot) asper_cycle_slot_acquire(c);
     if (run_cycle) {
-      e = asper_curation_cycle(c, force_cycle || (idle_trig && !batch_trig));
-      if (first == ASPER_OK) first = e;
+      /* A full flush drains the accepted snapshot even when scope/revision
+       * boundaries require several isolated curator batches. */
+      size_t limit=full ? tn : 1;
+      for (size_t batch=0;batch<limit;batch++) {
+        os_mutex_lock(&c->ev_mu);bool pending=c->turns_n>0;os_mutex_unlock(&c->ev_mu);
+        if (!pending) break;
+        e = asper_curation_cycle(c, force_cycle || (idle_trig && !batch_trig));
+        if (first == ASPER_OK) first = e;
+        if (e!=ASPER_OK) break;
+      }
     }
     if (full || maint_due) {
       e = asper_maintenance_review(c, full);

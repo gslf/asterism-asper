@@ -299,6 +299,20 @@ static jx_value *record_json(const asper_record *r) {
   ok &= jx_object_set(o, "content",
                       jx_string(asper_record_content(r))) == 0;
   ok &= jx_object_set(o, "source", jx_string(asper_record_source(r))) == 0;
+  { const asper_evidence *ev=asper_record_evidence(r);
+    static const char *const kinds[]={"declared","observed","inferred"};
+    ok &= jx_object_set(o,"evidence_kind",jx_string(kinds[ev->kind]))==0;
+    ok &= jx_object_set(o,"confidence",jx_double(ev->confidence))==0;
+    ok &= jx_object_set(o,"provenance",jx_string(ev->provenance))==0;
+    ok &= jx_object_set(o,"workspace",jx_string(ev->workspace))==0;
+    ok &= jx_object_set(o,"commit",jx_string(ev->commit))==0;
+    ok &= jx_object_set(o,"observed_at_unix",jx_int(ev->observed_at))==0;
+    ok &= jx_object_set(o,"expires_at_unix",jx_int(ev->expires_at))==0;
+    jx_value *refs=jx_array();
+    for (size_t j=0;j<asper_record_source_ref_count(r);j++)
+      if (jx_array_push(refs,jx_string(asper_record_source_ref(r,j)))!=0) ok=0;
+    ok &= jx_object_set(o,"source_refs",refs)==0;
+  }
   ok &= jx_object_set(o, "created_at_unix",
                       jx_int(asper_record_created_at(r))) == 0;
   ok &= jx_object_set(o, "updated_at_unix",

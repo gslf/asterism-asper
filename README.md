@@ -147,3 +147,10 @@ Tools: `memory_search`, `memory_recall`, `memory_insert`, `memory_update`, `memo
 ## License
 
 MIT — see [LICENSE](LICENSE).
+
+Semantic retrieval now combines exact identifiers, BM25 and optional vectors with
+rank fusion and deterministic reranking. `asper_record_evidence` exposes the
+claim kind, confidence, provenance, workspace/revision and expiry;
+`asper_memory_insert_evidenced` records host-supplied evidence. Curator hypotheses
+expire and cannot overwrite host declarations/observations. Explicit-project
+context/recall APIs support concurrent hosts without switching shared state.

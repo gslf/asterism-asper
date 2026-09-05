@@ -23,6 +23,7 @@ else()
 endif()
 
 set(ASPER_TEST_PROGRAMS
+  test_hybrid_evidence
   test_util
   test_time
   test_sha_uuid

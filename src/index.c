@@ -195,7 +195,8 @@ size_t asper_index_scan(const asper_index *ix, const asper_config *cfg,
         double cosine;
         size_t pos;
 
-        if (!asper_scan_match(r, section, project))
+        if (!asper_scan_match(r, section, project) ||
+            (r->evidence.expires_at > 0 && now >= r->evidence.expires_at))
             continue;
         cosine = asper_cosine(qvec, ix->vecs + i * (size_t)ix->dim, ix->dim);
         if (cosine < min_sim)

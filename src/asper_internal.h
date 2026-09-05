@@ -141,6 +141,12 @@ void asper_embedding_pipeline_hash(const uint8_t weights_hash[32],
                                    const char *passage_prefix,
                                    uint8_t out[32]);
 
+asper_err asper_memory_render_project(asper_ctx *c, const char *base,
+    const char *query, const char *project, char **out);
+asper_err asper_recall_run_project(asper_ctx *c, const char *question,
+    const char *project, int64_t deadline, char **answer,
+    asper_record ***cited, size_t *cited_n);
+
 /* ═══════════════════════ records ═══════════════════════ */
 
 typedef enum {
@@ -157,6 +163,7 @@ struct asper_record {
   char *project;           /* owned; non-NULL iff section == PROJECT */
   char *content;           /* owned */
   asper_source source;
+  asper_evidence evidence;
   asper_time created_at, updated_at, last_access;
   uint32_t access_count;
   double relevance;        /* stored base relevance [0,1] */
@@ -294,6 +301,7 @@ typedef struct {
   asper_record *record;    /* INSERT: owned full record */
   char id[37];             /* UPDATE/DEPRECATE/KEEP/SET_LOCKED */
   char *content;           /* UPDATE: owned */
+  bool declared_update;   /* host edit; false for curator/legacy uncertainty */
   char *reason;            /* DEPRECATE: owned, may be NULL */
   bool value;              /* SET_LOCKED */
   char (*ids)[37];         /* ACCESS: owned array */
@@ -584,6 +592,8 @@ typedef struct {
   asper_role role;
   char *text;      /* owned */
   asper_time at;
+  char scope[65], project[65];
+  asper_evidence evidence;
   char source_id[37]; /* immutable source event UUID */
 } asper_turn;
 
@@ -610,7 +620,7 @@ asper_err asper_access_flush(asper_ctx *c);
 /* Queue a source-persisted user/assistant event for semantic curation. */
 asper_err asper_enqueue_turn(asper_ctx *c, asper_role role,
                              const char *text_utf8, asper_time at,
-                             const char *source_id);
+                             const char *source_id, const char *scope, const char *object_ref);
 /* Rebuild the semantic-curation FIFO from durable source events not yet
  * acknowledged by a successful cycle, and acknowledge one completed batch. */
 asper_err asper_source_replay_pending(asper_ctx *c);

@@ -97,14 +97,30 @@ static asper_err append_data_text(asper_buf *b, const char *content)
   return ASPER_OK;
 }
 
-static int record_line_tokens(asper_ctx *c, const char *content,
+static asper_err evidence_label(asper_buf *b, const asper_record *r) {
+  const asper_evidence *ev=&r->evidence;
+  if (ev->kind==ASPER_EVIDENCE_DECLARED) return ASPER_OK;
+  asper_err e=asper_buf_printf(b,"[%s; confidence=%.2f; at=%lld; expires=%lld; id=%s; source=",
+      ev->kind==ASPER_EVIDENCE_INFERRED ? "inferred: verify before use" : "observed",
+      ev->confidence,ev->observed_at,ev->expires_at,r->id);
+  if (e==ASPER_OK) e=append_data_text(b,ev->provenance);
+  if (e==ASPER_OK && ev->workspace[0]) e=asper_buf_appends(b,"; workspace=");
+  if (e==ASPER_OK) e=append_data_text(b,ev->workspace);
+  if (e==ASPER_OK && ev->commit[0]) e=asper_buf_appends(b,"; commit=");
+  if (e==ASPER_OK) e=append_data_text(b,ev->commit);
+  if (e==ASPER_OK) e=asper_buf_appends(b,"] ");
+  return e;
+}
+
+static int record_line_tokens(asper_ctx *c, const asper_record *record,
                               asper_err *err)
 {
   asper_buf line;
   int t = 0;
   asper_buf_init(&line);
   *err = asper_buf_appends(&line, "- ");
-  if (*err == ASPER_OK) *err = append_data_text(&line, content);
+  if (*err == ASPER_OK) *err = evidence_label(&line,record);
+  if (*err == ASPER_OK) *err = append_data_text(&line, record->content ? record->content : "");
   if (*err == ASPER_OK) *err = asper_buf_appendc(&line, '\n');
   if (*err == ASPER_OK) t = asper_estimate_tokens(c, line.data);
   asper_buf_free(&line);
@@ -130,9 +146,8 @@ static asper_err section_trim(asper_ctx *c, asper_record *const *recs,
   size_t kept = 0;
   int used = 0;
   while (kept < n) {
-    const char *content = recs[kept]->content ? recs[kept]->content : "";
     asper_err err = ASPER_OK;
-    int t = record_line_tokens(c, content, &err);
+    int t = record_line_tokens(c, recs[kept], &err);
     if (err != ASPER_OK)
       return err;
     if (used + t > budget)
@@ -157,6 +172,8 @@ static asper_err section_block(asper_record *const *recs, size_t kept,
       return e;
     if ((e = asper_buf_appends(b, "- ")) != ASPER_OK)
       return e;
+    e=evidence_label(b,recs[i]);
+    if (e!=ASPER_OK) return e;
     if ((e = append_data_text(b, content)) != ASPER_OK)
       return e;
   }

@@ -10,6 +10,7 @@
 #include <string.h>
 
 #include "asper_internal.h"
+#include "xcdn.h"
 
 /* Defined in worker.c; asper_flush(1) uses them for the cycle slot. */
 extern void asper_cycle_slot_acquire(asper_ctx *c);
@@ -314,6 +315,9 @@ static asper_err apply_validate(asper_ctx *c, const asper_op *op,
     if (!t) {
       snprintf(why, why_sz, "unknown id %s", op->id);
       return ASPER_ERR_NOT_FOUND;
+    }
+    if (from_curator && (t->evidence.kind!=ASPER_EVIDENCE_INFERRED || op->declared_update)) {
+      snprintf(why,why_sz,"curator cannot overwrite host evidence");return ASPER_ERR_LOCKED;
     }
     if (t->locked) {
       snprintf(why, why_sz, "record %s is locked", op->id);
@@ -818,9 +822,37 @@ void asper_close(asper_ctx *c) {
 
 asper_err asper_enqueue_turn(asper_ctx *c, asper_role role,
                              const char *text_utf8, asper_time now,
-                             const char *source_id) {
+                             const char *source_id, const char *scope, const char *object_ref) {
   char *copy;
+  asper_turn meta;
+  memset(&meta,0,sizeof meta);
   if (!c) return ASPER_ERR_INVALID;
+  snprintf(meta.scope,sizeof meta.scope,"%s",scope ? scope : "");
+  meta.evidence.observed_at=now;
+  snprintf(meta.evidence.provenance,sizeof meta.evidence.provenance,"scope:%s",meta.scope);
+  { char *proj=NULL; (void)asper_project_active(c,&proj);
+    snprintf(meta.project,sizeof meta.project,"%s",proj ? proj : "");free(proj);
+  }
+  if (object_ref && object_ref[0]) {
+    void *data=NULL;size_t len=0;
+    if (asper_object_read(c,object_ref,0,0,&data,&len)==ASPER_OK) {
+      xcdn_error_t xe;memset(&xe,0,sizeof xe);
+      xcdn_document_t *doc=xcdn_parse_str(data,len,&xe);
+      if (doc && doc->values_len==1 && xcdn_node_has_tag(doc->values[0],"turn")) {
+        const xcdn_value_t *obj=doc->values[0]->value;
+        const char *keys[]={"workspace","commit","project"};
+        char *dst[]={meta.evidence.workspace,meta.evidence.commit,meta.project};
+        size_t caps[]={sizeof meta.evidence.workspace,sizeof meta.evidence.commit,sizeof meta.project};
+        for (size_t i=0;i<3;i++) {
+          const xcdn_node_t *v=xcdn_object_get(obj,keys[i]);
+          if (v && v->value && v->value->type==XCDN_VAL_STRING)
+            snprintf(dst[i],caps[i],"%s",v->value->data.string);
+        }
+      }
+      if (doc) xcdn_document_free(doc);
+      free(data);
+    }
+  }
   if (role != ASPER_ROLE_USER && role != ASPER_ROLE_ASSISTANT)
     return asper_seterr(c, ASPER_ERR_INVALID, "invalid role");
   if (asper_str_blank(text_utf8))
@@ -845,6 +877,7 @@ asper_err asper_enqueue_turn(asper_ctx *c, asper_role role,
     c->turns = nt;
     c->turns_cap = ncap;
   }
+  c->turns[c->turns_n]=meta;
   c->turns[c->turns_n].role = role;
   c->turns[c->turns_n].text = copy;
   c->turns[c->turns_n].at = now;
@@ -860,8 +893,15 @@ asper_err asper_enqueue_turn(asper_ctx *c, asper_role role,
   return ASPER_OK;
 }
 
-asper_err asper_memory_render(asper_ctx *c, const char *base_system_prompt,
-                              const char *user_message, char **out_prompt) {
+asper_err asper_memory_render(asper_ctx *c, const char *base,
+                              const char *query, char **out) {
+  char *project=NULL;
+  asper_err e=asper_project_active(c,&project);
+  if (e==ASPER_OK) e=asper_memory_render_project(c,base,query,project,out);
+  free(project);return e;
+}
+asper_err asper_memory_render_project(asper_ctx *c, const char *base_system_prompt,
+    const char *user_message, const char *selected_project, char **out_prompt) {
   asper_record **idr = NULL, **ctxr = NULL, **prr = NULL;
   size_t idn = 0, ctxn = 0, prn = 0, i;
   char *proj = NULL;
@@ -879,13 +919,9 @@ asper_err asper_memory_render(asper_ctx *c, const char *base_system_prompt,
     return asper_seterr(c, ASPER_ERR_INVALID,
                         "prompt input is not valid UTF-8");
 
-  /* Active project snapshot, taken once and used consistently. */
-  os_rwlock_rdlock(&c->lock);
-  had_proj = c->active_project != NULL;
-  proj = asper_strdup(c->active_project);
-  os_rwlock_rdunlock(&c->lock);
-  if (had_proj && !proj)
-    return asper_seterr(c, ASPER_ERR_NOMEM, "out of memory");
+  had_proj = selected_project != NULL;
+  proj = asper_strdup(selected_project);
+  if (had_proj && !proj) return ASPER_ERR_NOMEM;
 
   e = asper_collect_identity(c, &idr, &idn);
   if (e != ASPER_OK) goto out;
@@ -925,6 +961,14 @@ out:
 
 asper_err asper_recall(asper_ctx *c, const char *question, char **out_answer,
                        asper_record ***out_cited, size_t *out_cited_n) {
+  char *project=NULL;
+  asper_err e=asper_project_active(c,&project);
+  if (e==ASPER_OK) e=asper_recall_project(c,question,project,out_answer,out_cited,out_cited_n);
+  free(project);return e;
+}
+asper_err asper_recall_project(asper_ctx *c, const char *question,
+    const char *project, char **out_answer,
+    asper_record ***out_cited, size_t *out_cited_n) {
   asper_err e;
   int64_t timeout_ms;
   int64_t deadline;
@@ -950,7 +994,7 @@ asper_err asper_recall(asper_ctx *c, const char *question, char **out_answer,
   deadline = timeout_ms > 0 ? os_monotonic_ms() + timeout_ms : 0;
 
   if (c->no_threads) {
-    e = asper_recall_run(c, question, deadline, out_answer, out_cited,
+    e = asper_recall_run_project(c, question, project, deadline, out_answer, out_cited,
                          out_cited_n);
     if (e == ASPER_ERR_BUSY)
       return asper_seterr(c, e, "recall timed out after %lld s",
@@ -979,7 +1023,7 @@ asper_err asper_recall(asper_ctx *c, const char *question, char **out_answer,
   }
 
   /* The curator generation runs on the CALLER thread holding the slot. */
-  e = asper_recall_run(c, question, deadline, out_answer, out_cited,
+  e = asper_recall_run_project(c, question, project, deadline, out_answer, out_cited,
                        out_cited_n);
 
   os_mutex_lock(&c->ev_mu);
@@ -1098,9 +1142,18 @@ asper_err asper_project_active(asper_ctx *c, char **out_slug) {
 
 /* ---- direct memory access ----------------------------------------------- */
 
+const asper_evidence *asper_record_evidence(const asper_record *r) {
+  return r ? &r->evidence : NULL;
+}
+
 asper_err asper_memory_insert(asper_ctx *c, asper_section s,
+    const char *project, const char *content, int locked, char out_id[37]) {
+  return asper_memory_insert_evidenced(c, s, project, content, locked, NULL, out_id);
+}
+
+asper_err asper_memory_insert_evidenced(asper_ctx *c, asper_section s,
                               const char *project, const char *content,
-                              int locked, char out_id[37]) {
+                              int locked, const asper_evidence *evidence, char out_id[37]) {
   asper_record *r;
   asper_op op;
   asper_err e;
@@ -1109,6 +1162,14 @@ asper_err asper_memory_insert(asper_ctx *c, asper_section s,
   asper_time now;
 
   if (!c) return ASPER_ERR_INVALID;
+  if (evidence && (evidence->kind < ASPER_EVIDENCE_DECLARED ||
+      evidence->kind > ASPER_EVIDENCE_INFERRED ||
+      !(evidence->confidence >= 0 && evidence->confidence <= 1) ||
+      !memchr(evidence->provenance, 0, sizeof evidence->provenance) ||
+      !memchr(evidence->workspace, 0, sizeof evidence->workspace) ||
+      !memchr(evidence->commit, 0, sizeof evidence->commit) ||
+      !evidence->provenance[0] || evidence->observed_at < 0 ||
+      evidence->expires_at < 0)) return ASPER_ERR_INVALID;
   if (s != ASPER_SECTION_IDENTITY && s != ASPER_SECTION_CONTEXT &&
       s != ASPER_SECTION_PROJECT)
     return asper_seterr(c, ASPER_ERR_INVALID, "invalid section for insert");
@@ -1153,6 +1214,15 @@ asper_err asper_memory_insert(asper_ctx *c, asper_section s,
   }
   r->source = ASPER_SRC_MANUAL; /* the API path is always "manual"; seed
                                    records enter via hand-edited files only */
+  if (evidence) r->evidence = *evidence;
+  else {
+    r->evidence.kind = ASPER_EVIDENCE_DECLARED;
+    r->evidence.confidence = 1.0;
+    snprintf(r->evidence.provenance, sizeof r->evidence.provenance, "user:manual");
+  }
+  if (!r->evidence.observed_at) r->evidence.observed_at = now;
+  if (r->evidence.kind == ASPER_EVIDENCE_INFERRED && !r->evidence.expires_at)
+    r->evidence.expires_at = now + 30 * 86400;
   r->created_at = now;
   r->updated_at = now;
   r->last_access = now;
@@ -1185,6 +1255,7 @@ asper_err asper_memory_update(asper_ctx *c, const char *id,
     return asper_seterr(c, ASPER_ERR_INVALID, "invalid record id");
   memset(&op, 0, sizeof op);
   op.kind = ASPER_OP_UPDATE;
+  op.declared_update = true;
   op.at = asper_clock_now(&c->clock);
   memcpy(op.id, id, 37);
   op.content = asper_strdup(content);

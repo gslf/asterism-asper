@@ -68,9 +68,11 @@ static asper_err snapshot_active_project(asper_ctx *c, char **out)
 /* "(identity)" / "(context)" / "(project:slug)" */
 static asper_err append_label(asper_buf *b, const asper_record *r)
 {
-  if (r->section == ASPER_SECTION_PROJECT && r->project)
-    return asper_buf_printf(b, "(project:%s)", r->project);
-  return asper_buf_printf(b, "(%s)", asper_section_name(r->section));
+  static const char *const kinds[]={"declared","observed","inferred"};
+  return asper_buf_printf(b,"(%s%s%s; %s; confidence=%.2f; source=%s)",
+      asper_section_name(r->section),r->project ? ":" : "",r->project ? r->project : "",
+      kinds[r->evidence.kind],r->evidence.confidence,r->evidence.provenance);
+
 }
 
 static void free_turns(asper_turn *turns, size_t n)
@@ -105,6 +107,13 @@ static asper_err take_turns(asper_ctx *c, bool force, asper_turn **out,
   if (take == 0) {
     os_mutex_unlock(&c->ev_mu);
     return ASPER_OK;
+  }
+  /* Never let the curator combine conversations, workspaces or revisions. */
+  for (size_t i=1;i<take;i++) {
+    if (strcmp(c->turns[0].scope,c->turns[i].scope) ||
+        strcmp(c->turns[0].project,c->turns[i].project) ||
+        strcmp(c->turns[0].evidence.workspace,c->turns[i].evidence.workspace) ||
+        strcmp(c->turns[0].evidence.commit,c->turns[i].evidence.commit)) { take=i;break; }
   }
   asper_turn *t = malloc(take * sizeof *t);
   if (!t) {
@@ -525,6 +534,13 @@ static cycle_op_result cycle_do_insert(asper_ctx *c, const asper_cop *cop,
     return CYCLE_OP_REJECTED;
   }
   r->source = ASPER_SRC_CURATOR;
+  if (n_turns) r->evidence=turns[0].evidence;
+  r->evidence.kind = ASPER_EVIDENCE_INFERRED;
+  r->evidence.confidence = 0.5;
+  r->evidence.observed_at = now;
+  r->evidence.expires_at = now + 30 * 86400;
+  snprintf(r->evidence.provenance, sizeof r->evidence.provenance,
+           "curator:scope:%s; source_refs",n_turns ? turns[0].scope : "unknown");
   r->created_at = r->updated_at = r->last_access = now;
   r->access_count = 0;
   r->relevance = 0.60;
@@ -592,6 +608,10 @@ static cycle_op_result cycle_do_mutate(asper_ctx *c, const asper_cop *cop,
   snprintf(what, sizeof what, "%s M%d -> %s",
            is_upd ? "UPDATE" : "DEPRECATE", cop->handle, target->id);
 
+  if (target->evidence.kind != ASPER_EVIDENCE_INFERRED) {
+    count_drop(c, what, "curator cannot rewrite host evidence");
+    return CYCLE_OP_REJECTED;
+  }
   if (target->locked) {
     count_drop(c, what, "record locked");
     return CYCLE_OP_REJECTED;
@@ -725,9 +745,8 @@ asper_err asper_curation_cycle(asper_ctx *c, bool force)
   asper_cop *cops = NULL;
   size_t n_cops = 0, bad = 0;
 
-  rc = snapshot_active_project(c, &project);
-  if (rc != ASPER_OK)
-    goto fail;
+  project=turns[0].project[0] ? asper_strdup(turns[0].project) : NULL;
+  if (turns[0].project[0] && !project) { rc=ASPER_ERR_NOMEM;goto fail; }
 
   rc = collect_related(c, turns, n_turns, project, &handles, &n_handles);
   if (rc != ASPER_OK)
@@ -1107,6 +1126,15 @@ static asper_err build_recall_prompt(const char *question,
 }
 
 asper_err asper_recall_run(asper_ctx *c, const char *question,
+    int64_t deadline_ms, char **out_answer, asper_record ***out_cited,
+    size_t *out_cited_n) {
+  char *project=NULL; asper_err e=snapshot_active_project(c,&project);
+  if (e==ASPER_OK) e=asper_recall_run_project(c,question,project,deadline_ms,
+                                            out_answer,out_cited,out_cited_n);
+  free(project);return e;
+}
+asper_err asper_recall_run_project(asper_ctx *c, const char *question,
+                           const char *project,
                            int64_t deadline_ms,
                            char **out_answer, asper_record ***out_cited,
                            size_t *out_cited_n)
@@ -1125,17 +1153,13 @@ asper_err asper_recall_run(asper_ctx *c, const char *question,
     return asper_seterr(c, ASPER_ERR_MODEL,
                         "recall requires a curator model");
 
-  char *project = NULL;
-  asper_err rc = snapshot_active_project(c, &project);
-  if (rc != ASPER_OK)
-    return asper_seterr(c, rc, "recall: out of memory");
+  asper_err rc;
 
   asper_record **cands = NULL;
   size_t n_cands = 0;
   rc = asper_retrieve(c, question, ASPER_SECTION_ANY, project,
                       c->cfg.recall_k > 0 ? (size_t)c->cfg.recall_k : 0,
                       c->cfg.min_similarity, &cands, &n_cands);
-  free(project);
   if (rc != ASPER_OK)
     return rc;
   if (n_cands == 0) {

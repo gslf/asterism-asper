@@ -116,6 +116,7 @@ set(ASPER_SOURCES
   src/index.c
   src/decay.c
   src/retrieve.c
+  src/hybrid.c
   src/inject.c
   src/grammar.c
   src/curator.c

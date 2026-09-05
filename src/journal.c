@@ -343,6 +343,13 @@ static xcdn_node_t *record_build_node(const asper_record *r) {
   if (ok)
     ok = xobj_put(obj, "source",
                   xcdn_value_string(asper_source_name(r->source)));
+  if (ok) ok = xobj_put(obj, "evidence_kind", xcdn_value_int(r->evidence.kind));
+  if (ok) ok = xobj_put(obj, "confidence", xcdn_value_float(r->evidence.confidence));
+  if (ok) ok = xobj_put(obj, "observed_at", xcdn_value_int(r->evidence.observed_at));
+  if (ok) ok = xobj_put(obj, "expires_at", xcdn_value_int(r->evidence.expires_at));
+  if (ok) ok = xobj_put(obj, "provenance", xstr_esc(r->evidence.provenance));
+  if (ok) ok = xobj_put(obj, "workspace", xstr_esc(r->evidence.workspace));
+  if (ok) ok = xobj_put(obj, "commit", xstr_esc(r->evidence.commit));
   if (ok && r->source_refs_n > 0) {
     xcdn_value_t *refs = xcdn_value_array();
     if (!refs) {
@@ -465,6 +472,7 @@ asper_err asper_op_serialize(const asper_op *op, asper_buf *out) {
     case ASPER_OP_UPDATE:
       if (ok) ok = xobj_put(obj, "id", xcdn_value_uuid(op->id));
       if (ok) ok = xobj_put(obj, "content", xstr_esc(op->content));
+      if (ok) ok = xobj_put(obj,"declared_update",xcdn_value_bool(op->declared_update));
       break;
     case ASPER_OP_DEPRECATE:
       if (ok) ok = xobj_put(obj, "id", xcdn_value_uuid(op->id));
@@ -654,6 +662,60 @@ asper_err asper_record_from_node(asper_ctx *c, const void *xcdn_node,
     r->last_access = r->created_at;
   }
 
+  /* Old records retain explicit uncertainty; curator records get a fixed
+   * expiry anchored to creation, never refreshed by retrieval or review. */
+  r->evidence.kind = r->source == ASPER_SRC_CURATOR ?
+      ASPER_EVIDENCE_INFERRED : ASPER_EVIDENCE_DECLARED;
+  r->evidence.confidence = r->source == ASPER_SRC_CURATOR ? 0.5 : 1.0;
+  r->evidence.observed_at = r->created_at;
+  snprintf(r->evidence.provenance, sizeof r->evidence.provenance,
+           "legacy:%s", asper_source_name(r->source));
+  v = obj_field(obj, "evidence_kind");
+  if (v) {
+    if (v->type != XCDN_VAL_INT || v->data.integer < 0 || v->data.integer > 2)
+      REC_FAIL("record %s: invalid evidence kind", r->id);
+    r->evidence.kind = (asper_evidence_kind)v->data.integer;
+  }
+  v = obj_field(obj, "confidence");
+  if (v) {
+    if (v->type != XCDN_VAL_FLOAT && v->type != XCDN_VAL_INT)
+      REC_FAIL("record %s: invalid confidence", r->id);
+    r->evidence.confidence = v->type == XCDN_VAL_FLOAT ?
+        v->data.floating : (double)v->data.integer;
+    if (!(r->evidence.confidence >= 0 && r->evidence.confidence <= 1))
+      REC_FAIL("record %s: invalid confidence", r->id);
+  }
+  { const char *keys[] = {"provenance", "workspace", "commit"};
+    char *dst[] = {r->evidence.provenance, r->evidence.workspace, r->evidence.commit};
+    size_t caps[] = {sizeof r->evidence.provenance, sizeof r->evidence.workspace,
+                     sizeof r->evidence.commit};
+    for (size_t i = 0; i < 3; i++) {
+      v = obj_field(obj, keys[i]);
+      if (v) {
+        char *decoded;
+        s = val_str(v);
+        if (!s) REC_FAIL("record %s: invalid evidence string", r->id);
+        decoded = esc_decode_checked(s);
+        if (!decoded) REC_OOM();
+        if (strlen(decoded) >= caps[i]) { free(decoded); REC_FAIL("evidence too long"); }
+        strcpy(dst[i], decoded); free(decoded);
+      }
+    }
+  }
+  { const char *keys[] = {"observed_at", "expires_at"};
+    long long *dst[] = {&r->evidence.observed_at, &r->evidence.expires_at};
+    for (size_t i = 0; i < 2; i++) {
+      v = obj_field(obj, keys[i]);
+      if (v) {
+        if (v->type != XCDN_VAL_INT || v->data.integer < 0)
+          REC_FAIL("record %s: invalid evidence timestamp", r->id);
+        *dst[i] = v->data.integer;
+      }
+    }
+  }
+  if (r->evidence.kind == ASPER_EVIDENCE_INFERRED && !r->evidence.expires_at)
+    r->evidence.expires_at = r->created_at + 30 * 86400;
+
   v = obj_field(obj, "access_count");
   if (v) {
     if (v->type != XCDN_VAL_INT)
@@ -793,6 +855,11 @@ asper_err asper_op_from_node(asper_ctx *c, const void *xcdn_node,
         OP_FAIL("op update: missing or invalid id");
       s = val_str(obj_field(obj, "content"));
       if (!s) OP_FAIL("op update: missing content");
+      v=obj_field(obj,"declared_update");
+      if (v) {
+        if (v->type!=XCDN_VAL_BOOL) OP_FAIL("invalid declared_update");
+        out->declared_update=v->data.boolean;
+      }
       out->content = esc_decode_checked(s);
       if (!out->content) OP_OOM();
       break;

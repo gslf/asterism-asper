@@ -192,6 +192,24 @@ const char *asper_last_error(const asper_ctx *c);
 
 typedef struct asper_record asper_record;
 
+/* Evidence is supplied by the host, never by the curator's own verdict.
+ * Empty workspace/commit mean unknown, not evidence of current validity. */
+typedef enum {
+  ASPER_EVIDENCE_DECLARED = 0, ASPER_EVIDENCE_OBSERVED, ASPER_EVIDENCE_INFERRED
+} asper_evidence_kind;
+typedef struct {
+  asper_evidence_kind kind;
+  double confidence;
+  long long observed_at, expires_at; /* Unix seconds; 0 = host default */
+  char provenance[256];             /* source URI, tool invocation, or user */
+  char workspace[1024];
+  char commit[65];
+} asper_evidence;
+const asper_evidence *asper_record_evidence(const asper_record *r);
+asper_err asper_memory_insert_evidenced(asper_ctx *c, asper_section s,
+    const char *project, const char *content, int locked,
+    const asper_evidence *evidence, char out_id[37]);
+
 const char   *asper_record_id(const asper_record *r);          /* UUID */
 asper_section asper_record_section(const asper_record *r);
 /* Project slug, or NULL when the record is not in a project section. */
@@ -217,6 +235,20 @@ const char   *asper_record_source_ref(const asper_record *r, size_t i);
 /* Retrieval score when the record came from asper_memory_search; else 0. */
 double        asper_record_score(const asper_record *r);
 
+/* Corpus IDs are caller-owned array indices. Vectors may be NULL: exact
+ * matching and BM25 remain available without an embedding backend. */
+typedef struct {
+  const char *path, *symbols, *text;
+  const float *vector;
+} asper_search_document;
+typedef struct {
+  size_t index;
+  double score, bm25, vector, exact, coverage;
+} asper_search_hit;
+asper_err asper_hybrid_search(const asper_search_document *docs, size_t n,
+    const char *query, const float *query_vector, size_t dim,
+    size_t k, asper_search_hit *out, size_t *out_n);
+
 /* ---- recall: pull channel ------------------------------------------------ */
 
 /* Blocking, up to recall.timeout. out_cited/out_cited_n may be NULL if the
@@ -225,6 +257,12 @@ double        asper_record_score(const asper_record *r);
 asper_err asper_recall(asper_ctx *c, const char *question,
                        char **out_answer,
                        asper_record ***out_cited, size_t *out_cited_n);
+
+/* Explicit project variants do not mutate the context's active project. */
+asper_err asper_recall_project(asper_ctx *c, const char *question,
+    const char *project, char **answer, asper_record ***cited, size_t *cited_n);
+asper_err asper_context_materialize_project(asper_ctx *c,
+    const asper_context_request *request, const char *project, asper_context_pack *out);
 
 /* ---- projects ---------------------------------------------------------- */
 

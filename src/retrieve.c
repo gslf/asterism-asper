@@ -11,6 +11,7 @@
  */
 
 #include <stdint.h>
+#include <math.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -21,6 +22,67 @@ static void free_clone_array(asper_record **arr, size_t n)
   for (size_t i = 0; i < n; i++)
     asper_record_free_one(arr[i]);
   free(arr);
+}
+
+static asper_err retrieve_hybrid(asper_ctx *c, const char *query,
+    asper_section section, const char *project, size_t k, double min_sim,
+    asper_record ***out, size_t *out_n) {
+  asper_search_document *docs = NULL;
+  asper_record **refs = NULL, **arr = NULL;
+  asper_search_hit *hits = NULL;
+  float *vec = NULL; size_t n = 0, hn = 0;
+  asper_err e = ASPER_OK;
+  int dim = c->embedder.dim;
+  if (!k) return ASPER_OK;
+  if (c->has_embedder && dim > 0) {
+    vec = calloc((size_t)dim, sizeof *vec);
+    if (!vec) return ASPER_ERR_NOMEM;
+    if (c->embedder.embed(c->embedder.ud, query, 1, vec) != ASPER_OK) {
+      free(vec); vec = NULL; /* lexical fallback on model outage */
+    }
+  }
+  if (vec) {
+    double norm=0;for (int i=0;i<dim;i++) norm+=(double)vec[i]*vec[i];
+    if (norm>0 && isfinite(norm)) for (int i=0;i<dim;i++) vec[i]/=(float)sqrt(norm);
+    else { free(vec);vec=NULL; }
+  }
+  os_rwlock_rdlock(&c->lock);
+  size_t cap = c->store.table.n;
+  if (k > cap) k = cap;
+  docs = calloc(cap ? cap : 1, sizeof *docs);
+  refs = calloc(cap ? cap : 1, sizeof *refs);
+  hits = calloc(k ? k : 1, sizeof *hits);
+  if (!docs || !refs || !hits) { e = ASPER_ERR_NOMEM; goto done; }
+  for (size_t i=0; i<cap; i++) {
+    asper_record *r = c->store.table.recs[i];
+    if (r->deprecated || (r->evidence.expires_at > 0 &&
+        asper_clock_now(&c->clock) >= r->evidence.expires_at) ||
+        (section != ASPER_SECTION_ANY && r->section != section) ||
+        (r->section == ASPER_SECTION_PROJECT && (!project || !r->project ||
+         strcmp(project,r->project)))) continue;
+    refs[n] = r; docs[n].text = r->content;
+    docs[n].path = r->evidence.provenance;
+    docs[n].symbols = r->content;
+    if (vec && dim == c->index.dim) {
+      const float *rv=asper_index_vec(&c->index,r);
+      if (rv && asper_cosine(vec,rv,dim)>=min_sim) docs[n].vector=rv;
+    }
+    n++;
+  }
+  e = asper_hybrid_search(docs,n,query,vec,(size_t)(dim>0?dim:0),k,hits,&hn);
+  if (e != ASPER_OK) goto done;
+  arr = calloc(hn ? hn : 1,sizeof *arr);
+  if (!arr) { e=ASPER_ERR_NOMEM; goto done; }
+  for (size_t i=0;i<hn;i++) {
+    arr[i]=asper_record_clone(refs[hits[i].index]);
+    if (!arr[i]) { free_clone_array(arr,i); arr=NULL; e=ASPER_ERR_NOMEM; goto done; }
+    arr[i]->score=hits[i].score;
+  }
+  *out=arr; *out_n=hn;
+done:
+  os_rwlock_rdunlock(&c->lock);
+  free(docs); free(refs); free(hits); free(vec);
+  return e;
 }
 
 asper_err asper_retrieve_ex(asper_ctx *c, const char *query, asper_section s,
@@ -34,7 +96,9 @@ asper_err asper_retrieve_ex(asper_ctx *c, const char *query, asper_section s,
   *out_n = 0;
   if (!query)
     return asper_seterr(c, ASPER_ERR_INVALID, "retrieve: NULL query");
-  /* Degraded mode (no embedding model): silence, not an error. */
+  if (!score_is_cos)
+    return retrieve_hybrid(c, query, s, project, k, min_sim, out, out_n);
+  /* Cosine-only mode is reserved for deduplication, never hybrid scores. */
   if (!c->has_embedder || k == 0)
     return ASPER_OK;
 
@@ -117,7 +181,9 @@ asper_err asper_collect_identity(asper_ctx *c, asper_record ***out,
   size_t cnt = 0;
   for (size_t i = 0; i < t->n; i++) {
     const asper_record *r = t->recs[i];
-    if (r->section == ASPER_SECTION_IDENTITY && !r->deprecated)
+    if (r->section == ASPER_SECTION_IDENTITY && !r->deprecated &&
+        r->evidence.kind != ASPER_EVIDENCE_INFERRED &&
+        (!r->evidence.expires_at || asper_clock_now(&c->clock)<r->evidence.expires_at))
       cnt++;
   }
   if (cnt == 0) {
@@ -133,7 +199,9 @@ asper_err asper_collect_identity(asper_ctx *c, asper_record ***out,
   size_t n = 0;
   for (size_t i = 0; i < t->n && n < cnt; i++) {
     const asper_record *r = t->recs[i];
-    if (r->section != ASPER_SECTION_IDENTITY || r->deprecated)
+    if (r->section != ASPER_SECTION_IDENTITY || r->deprecated ||
+        r->evidence.kind == ASPER_EVIDENCE_INFERRED ||
+        (r->evidence.expires_at && asper_clock_now(&c->clock)>=r->evidence.expires_at))
       continue;
     asper_record *clone = asper_record_clone(r);
     if (!clone) {

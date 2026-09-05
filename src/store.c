@@ -43,6 +43,7 @@ asper_record *asper_record_clone(const asper_record *r) {
   memcpy(n->id, r->id, sizeof(n->id));
   n->section = r->section;
   n->source = r->source;
+  n->evidence = r->evidence;
   n->created_at = r->created_at;
   n->updated_at = r->updated_at;
   n->last_access = r->last_access;
@@ -756,6 +757,17 @@ asper_err asper_store_apply(asper_ctx *c, asper_op *op) {
       free(rec->content);
       rec->content = nc;
       rec->updated_at = op->at;
+      /* A changed claim cannot inherit the previous claim's tool evidence. */
+      long long expiry=rec->evidence.expires_at;
+      memset(&rec->evidence,0,sizeof rec->evidence);
+      rec->evidence.kind=op->declared_update ? ASPER_EVIDENCE_DECLARED : ASPER_EVIDENCE_INFERRED;
+      rec->evidence.confidence=op->declared_update ? 1.0 : 0.5;
+      rec->evidence.observed_at=op->at;
+      rec->evidence.expires_at=op->declared_update ? 0 : expiry ? expiry : op->at+30*86400;
+      snprintf(rec->evidence.provenance,sizeof rec->evidence.provenance,
+               "%s",op->declared_update ? "user:manual-update" : "curator:unverified-update");
+      for (size_t i=0;i<rec->source_refs_n;i++) free(rec->source_refs[i]);
+      free(rec->source_refs);rec->source_refs=NULL;rec->source_refs_n=0;
       return ASPER_OK;
     }
 

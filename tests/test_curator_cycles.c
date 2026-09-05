@@ -219,7 +219,7 @@ TEST(update_on_locked_dropped) {
   asper_test_rmtree(root);
 }
 
-TEST(identity_quorum_same_op_applies_second_time) {
+TEST(identity_reproposal_cannot_overwrite_declaration) {
   char root[256], id[37];
   asper_ctx *c;
   ASSERT_TRUE(asper_test_tmpdir(root));
@@ -236,22 +236,22 @@ TEST(identity_quorum_same_op_applies_second_time) {
   ASSERT_EQ_INT(count_with_content(c, ASPER_SECTION_IDENTITY,
                                    "The assistant tone is formal"),
                 1);
-  /* same op re-proposed within the window: applied */
+  /* Repetition is not independent evidence: the declaration survives. */
   ASSERT_TRUE(
       fake_curator_push(&g_cur, "UPDATE M1 | The assistant tone is casual\n"));
   ASSERT_TRUE(run_cycle(c, "make the tone formal please"));
   ASSERT_EQ_INT(count_with_content(c, ASPER_SECTION_IDENTITY,
                                    "The assistant tone is casual"),
-                1);
+                0);
   ASSERT_EQ_INT(count_with_content(c, ASPER_SECTION_IDENTITY,
                                    "The assistant tone is formal"),
-                0);
+                1);
   asper_close(c);
   fake_curator_dispose(&g_cur);
   asper_test_rmtree(root);
 }
 
-TEST(identity_quorum_different_content_restarts) {
+TEST(identity_variants_cannot_overwrite_declaration) {
   char root[256], id[37];
   asper_ctx *c;
   ASSERT_TRUE(asper_test_tmpdir(root));
@@ -271,13 +271,13 @@ TEST(identity_quorum_different_content_restarts) {
   ASSERT_EQ_INT(count_with_content(c, ASPER_SECTION_IDENTITY,
                                    "The assistant tone is formal"),
                 1);
-  /* the second proposal confirmed: applied */
+  /* Variations and repeated proposals cannot replace host evidence. */
   ASSERT_TRUE(fake_curator_push(&g_cur,
                                 "UPDATE M1 | The assistant tone is playful\n"));
   ASSERT_TRUE(run_cycle(c, "make the tone formal please"));
   ASSERT_EQ_INT(count_with_content(c, ASPER_SECTION_IDENTITY,
                                    "The assistant tone is playful"),
-                1);
+                0);
   asper_close(c);
   fake_curator_dispose(&g_cur);
   asper_test_rmtree(root);
@@ -539,8 +539,8 @@ TEST_LIST = {
     TEST_ENTRY(transient_generation_failure_retains_turns),
     TEST_ENTRY(insert_project_without_active_project_dropped),
     TEST_ENTRY(update_on_locked_dropped),
-    TEST_ENTRY(identity_quorum_same_op_applies_second_time),
-    TEST_ENTRY(identity_quorum_different_content_restarts),
+    TEST_ENTRY(identity_reproposal_cannot_overwrite_declaration),
+    TEST_ENTRY(identity_variants_cannot_overwrite_declaration),
     TEST_ENTRY(identity_quorum_pending_expires),
     TEST_ENTRY(dedup_converts_insert_to_boost),
     TEST_ENTRY(max_ops_per_cycle_cap),
