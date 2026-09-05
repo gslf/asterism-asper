@@ -162,9 +162,10 @@ static asper_err cll_apply_template(const char *tmpl,
 
 static asper_err cll_generate(void *ud, const char *system_prompt,
                               const char *user_prompt, const char *gbnf,
-                              int max_tokens, int64_t deadline_ms,
+                              const asper_output_contract *contract, int max_tokens, int64_t deadline_ms,
                               char **out_text)
 {
+  (void)contract;
   cll_ud *u = (cll_ud *)ud;
   char *prompt = NULL;
   llama_token *tok = NULL;

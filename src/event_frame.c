@@ -105,7 +105,7 @@ asper_err asper_event_frame_read(FILE *f, asper_event *e) {
   if (len < 0 || len >= (int)sizeof head || used != len + 130 ||
       strncmp(line, head, (size_t)len) || line[len] != ' ')
     return ASPER_ERR_PARSE;
-  /* Authenticate lengths before deciding whether the payload is torn. */
+  /* Check length integrity before deciding whether the payload is torn. */
   asper_sha256(head, (size_t)len, bytes);
   hex_digest(bytes, expected);
   if (strcmp(expected, header_hash)) return ASPER_ERR_PARSE;

@@ -451,6 +451,20 @@ double  asper_score_record(const asper_config *cfg, const asper_record *r,
  * Returns <0 if a ranks before b. */
 int     asper_hit_cmp(const asper_hit *a, const asper_hit *b);
 
+typedef enum {
+  ASPER_GRAMMAR_CURATION = 0,  /* INSERT/UPDATE/DEPRECATE/NOOP (+KEEP off) */
+  ASPER_GRAMMAR_REVIEW,        /* DEPRECATE/KEEP/NOOP */
+  ASPER_GRAMMAR_RECALL         /* ANSWER/CITE/NOMEM */
+} asper_grammar_kind;
+
+typedef struct {
+  asper_grammar_kind kind;
+  size_t handles;
+  int content_max_chars;
+} asper_output_contract;
+char *asper_output_schema(const asper_output_contract *contract);
+asper_err asper_output_decode(char **text);
+
 /* ═══════════════════════ embedder / curator vtables ═══════════════════════ */
 
 typedef struct {
@@ -477,7 +491,7 @@ typedef struct {
    * not assume thread affinity. */
   asper_err (*generate)(void *ud, const char *system_prompt,
                         const char *user_prompt, const char *gbnf,
-                        int max_tokens, int64_t deadline_ms,
+                        const asper_output_contract *contract, int max_tokens, int64_t deadline_ms,
                         char **out_text);
   /* Token count with the curator tokenizer; <0 on error. Any thread. */
   int (*count_tokens)(void *ud, const char *text);
@@ -564,11 +578,7 @@ typedef struct {
   char *text;              /* owned: fact / reason / answer; may be NULL */
 } asper_cop;
 
-typedef enum {
-  ASPER_GRAMMAR_CURATION = 0,  /* INSERT/UPDATE/DEPRECATE/NOOP (+KEEP off) */
-  ASPER_GRAMMAR_REVIEW,        /* DEPRECATE/KEEP/NOOP */
-  ASPER_GRAMMAR_RECALL         /* ANSWER/CITE/NOMEM */
-} asper_grammar_kind;
+
 
 /* Emit llama.cpp GBNF for the cycle; handle_count = number of M<n> handles
  * (0 => no handle-bearing productions). malloc'd string. */

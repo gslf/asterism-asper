@@ -32,7 +32,7 @@ static int legacy_generate(void *ud, const char *sys, const char *user,
   legacy_provider *p = (legacy_provider *)ud;
   asper_err e;
   if (cancel && *cancel) return -1;
-  e = p->curator.generate(p->curator.ud, sys, user, grammar,
+  e = p->curator.generate(p->curator.ud, sys, user, grammar, NULL,
                           params->max_tokens, params->deadline_ms, out);
   if (e != ASPER_OK) return -1;
   if (out_in) *out_in = 0;
@@ -190,17 +190,22 @@ static int managed_count(void *ud, const char *text) {
 }
 
 static asper_err managed_generate(void *ud, const char *sys, const char *user,
-                                  const char *grammar, int max_tokens,
+                                  const char *grammar, const asper_output_contract *contract, int max_tokens,
                                   int64_t deadline_ms, char **out) {
   model_ref *r = (model_ref *)ud;
-  asmodel_generate_params p;
-  memset(&p, 0, sizeof p);
+  asmodel_generate_params p = {0};
+  asmodel_generation_info info = {0};
+  char *schema = contract ? asper_output_schema(contract) : NULL;
+  if (contract && !schema) return ASPER_ERR_NOMEM;
   p.max_tokens = max_tokens; p.deadline_ms = deadline_ms;
-  if (asmodel_generate(r->manager, r->id, sys, user, grammar, &p,
-                       NULL, NULL, NULL, out, NULL, NULL) == ASMODEL_OK)
-    return ASPER_OK;
-  return asper_seterr(r->ctx, ASPER_ERR_MODEL, "model '%s': %s", r->id,
-                      asmodel_manager_last_error(r->manager));
+  p.output_schema = schema; p.require_constraint = grammar != NULL || schema != NULL;
+  p.result_info = &info;
+  asmodel_err e = asmodel_generate(r->manager, r->id, sys, user, grammar, &p,
+                                   NULL, NULL, NULL, out, NULL, NULL);
+  free(schema);
+  if (e == ASMODEL_OK) return info.json_output ? asper_output_decode(out) : ASPER_OK;
+  return asper_seterr(r->ctx, ASPER_ERR_MODEL, "model '%s': %s", r->id, info.error);
+
 }
 
 static void ref_destroy(void *ud) { free(ud); }
@@ -240,6 +245,7 @@ static void pipeline_hash(asper_ctx *c, const char *id, uint8_t out[32]) {
 
 asper_err asper_models_bind(asper_ctx *c, const asper_model_binding *binding,
                             asper_embedder *emb, asper_curator_iface *cur) {
+  if (asmodel_abi_version() != ASMODEL_ABI_VERSION) return ASPER_ERR_CONFIG;
   model_ref *er, *cr;
   const char *eid, *cid;
   int embed_ready = 1, curator_ready = 1;

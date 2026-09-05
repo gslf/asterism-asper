@@ -122,6 +122,7 @@ set(ASPER_SOURCES
   src/hybrid.c
   src/inject.c
   src/grammar.c
+  src/output_contract.c
   src/curator.c
   src/worker.c
   src/api.c

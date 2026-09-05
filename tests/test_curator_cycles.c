@@ -533,7 +533,32 @@ TEST(gbnf_shapes) {
   free(g);
 }
 
+TEST(explicit_output_contract_preserves_source_operations) {
+  asper_output_contract contract = {ASPER_GRAMMAR_CURATION, 2, 500};
+  char *schema = asper_output_schema(&contract);
+  char *text = asper_strdup("{\"output\":\"UPDATE M2 | observed Unicode è\\n\"}");
+  asper_cop *ops = NULL;
+  size_t n = 0, bad = 0;
+  ASSERT_TRUE(schema != NULL);
+  ASSERT_TRUE(strstr(schema, "M1|M2") != NULL);
+  ASSERT_OK(asper_output_decode(&text));
+  ASSERT_OK(asper_protocol_parse(text, 2, &ops, &n, &bad));
+  ASSERT_EQ_INT(n, 1); ASSERT_EQ_INT(bad, 0);
+  asper_cops_free(ops, n); free(text); free(schema);
+  text = asper_strdup("{\"output\":\"NOOP\\n\",\"untrusted\":true}");
+  ASSERT_ERR(asper_output_decode(&text), ASPER_ERR_PARSE); free(text);
+  text = asper_strdup("{\"output\":\"NOOP\\n\",\"output\":\"NOOP\\n\"}");
+  ASSERT_ERR(asper_output_decode(&text), ASPER_ERR_PARSE); free(text);
+  text = asper_strdup("{\"output\":\"NOOP\\n\\u0000trailing\"}");
+  ASSERT_ERR(asper_output_decode(&text), ASPER_ERR_PARSE); free(text);
+  contract.kind = ASPER_GRAMMAR_REVIEW; contract.handles = 0;
+  schema = asper_output_schema(&contract);
+  ASSERT_TRUE(schema != NULL && strstr(schema, "M1") == NULL);
+  free(schema);
+}
+
 TEST_LIST = {
+  TEST_ENTRY(explicit_output_contract_preserves_source_operations),
     TEST_ENTRY(scripted_insert_applied),
     TEST_ENTRY(overlong_content_rejected),
     TEST_ENTRY(transient_generation_failure_retains_turns),

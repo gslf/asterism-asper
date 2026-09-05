@@ -103,11 +103,12 @@ void fake_curator_busy_on_deadline(fake_curator *fc, int enabled) {
 
 static asper_err fake_curator_generate(void *ud, const char *system_prompt,
                                        const char *user_prompt,
-                                       const char *gbnf, int max_tokens,
+                                       const char *gbnf, const asper_output_contract *contract, int max_tokens,
                                        int64_t deadline_ms,
                                        char **out_text) {
   fake_curator *fc = (fake_curator *)ud;
   const char *reply = "NOOP\n";
+  (void)contract;
   (void)max_tokens;
   (void)deadline_ms;
   if (!fc || !out_text) return ASPER_ERR_INVALID;

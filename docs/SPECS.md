@@ -277,3 +277,13 @@ A store holds a single-writer OS lock throughout its lifetime. Opening it again
 returns `ASPER_ERR_BUSY`; a host should lend one context to its session lanes.
 An I/O error after an append has started can have an uncertain durable outcome;
 callers must reconcile the event log rather than blindly retry the operation.
+
+
+### Model output contracts
+
+Curation, review and recall pass an explicit kind and handle set to the shared
+model adapter. The owner compiles both GBNF and JSON Schema. `asmodel` returns the
+selected encoding without application-specific interpretation; Asper validates
+the single JSON `output` property before interpreting operations. Duplicate keys,
+binary payloads and trailing properties are rejected. `asper_models_bind` checks
+the shared runtime ABI before using its provider structures.
