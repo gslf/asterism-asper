@@ -149,7 +149,7 @@ double asper_cosine(const float *a, const float *b, int dim)
 static bool asper_scan_match(const asper_record *r, asper_section section,
                              const char *project)
 {
-    if (r->deprecated)
+    if (r->deprecated || r->knowledge_status >= ASPER_KNOWLEDGE_STALE)
         return false;
     if (section != ASPER_SECTION_ANY && r->section != section)
         return false;

@@ -154,9 +154,7 @@ int asper_record_deprecated(const asper_record *r) {
   return (r && r->deprecated) ? 1 : 0;
 }
 
-const char *asper_record_supersedes(const asper_record *r) {
-  return (r && r->supersedes[0] != '\0') ? r->supersedes : NULL;
-}
+
 
 size_t asper_record_tag_count(const asper_record *r) {
   return r ? r->tags_n : 0;
@@ -430,7 +428,8 @@ asper_err asper_apply_op(asper_ctx *c, asper_op *op, bool from_curator) {
   }
 
   os_rwlock_wrlock(&c->lock);
-  e = apply_validate(c, op, from_curator, &target, why, sizeof why);
+  e = asper_knowledge_guard(c);
+  if (e == ASPER_OK) e = apply_validate(c, op, from_curator, &target, why, sizeof why);
   if (e != ASPER_OK) {
     c->stats.ops_rejected++;
     os_rwlock_wrunlock(&c->lock);
@@ -496,6 +495,7 @@ asper_err asper_apply_op(asper_ctx *c, asper_op *op, bool from_curator) {
     break;
   }
 
+  asper_knowledge_refresh(c);
   c->stats.ops_applied++;
   if (target) memcpy(idbuf, target->id, sizeof idbuf);
   access_n = op->ids_n;
@@ -528,6 +528,7 @@ static void ctx_destroy(asper_ctx *c, bool store_opened) {
   if (c->has_curator && c->curator.destroy)
     c->curator.destroy(c->curator.ud);
   asper_models_shutdown(c);
+  asper_knowledge_close(c);
   asper_index_free(&c->index);
   if (store_opened) {
     asper_store_close(c);
@@ -639,6 +640,8 @@ static asper_err asper_open_impl(const asper_open_params *p,
   e = asper_store_open(c);
   if (e != ASPER_OK) goto fail;
   store_opened = true;
+  e = asper_knowledge_open(c);
+  if (e != ASPER_OK) goto fail;
 
   memset(&managed_emb, 0, sizeof managed_emb);
   memset(&managed_cur, 0, sizeof managed_cur);
@@ -1248,7 +1251,6 @@ asper_err asper_memory_insert_evidenced(asper_ctx *c, asper_section s,
   r->locked = locked != 0;
   r->deprecated = false;
   r->deprecated_at = 0;
-  r->supersedes[0] = '\0';
   r->score = 0.0;
   r->emb_row = -1;
 

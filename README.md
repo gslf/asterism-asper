@@ -167,3 +167,12 @@ inputs return `ASPER_ERR_LIMIT` instead of truncating. Manager calls support
 batch receipts, cancellation and remaining duration. Existing public memory
 operations use the configured recall timeout unless an internal caller supplies
 more specific controls; turn-wide cancellation propagation is still separate.
+
+### Grounded memory (ABI 5)
+
+[Grounding and correction history](docs/knowledge.md) binds exact source spans,
+versioned dependencies and support/contradiction/correction links to claim hashes.
+Stale or revoked knowledge is excluded from retrieval; history stays inspectable.
+Host observations must be renewed after restart. The old standalone `supersedes`
+field was removed in favor of version-bound grounding links. This is a validity
+contract, not a claim that referenced text is necessarily true.

@@ -167,12 +167,13 @@ struct asper_record {
   bool locked;
   bool deprecated;         /* status: "deprecated" when true */
   asper_time deprecated_at; /* 0 unless deprecated */
-  char supersedes[37];     /* empty string when null */
   char **tags;             /* owned array of owned strings */
   size_t tags_n;
   char **source_refs;      /* source event UUIDs, owned */
   size_t source_refs_n;
   /* -- volatile, not persisted -- */
+  asper_knowledge_status knowledge_status;
+  unsigned long long knowledge_revision;
   double score;            /* retrieval score on search results */
   int emb_row;             /* row in asper_index, -1 if absent */
 };
@@ -692,7 +693,15 @@ void asper_log(asper_ctx *c, int level, const char *subsys,
 
 /* ═══════════════════════ the context ═══════════════════════ */
 
+struct asper_knowledge;
+asper_err asper_knowledge_open(asper_ctx *c);
+void asper_knowledge_close(asper_ctx *c);
+/* Caller holds c->lock for writing. Updates the volatile status on all records. */
+void asper_knowledge_refresh(asper_ctx *c);
+asper_err asper_knowledge_guard(asper_ctx *c);
+
 struct asper_ctx {
+  struct asper_knowledge *knowledge;
   FILE *store_lock;
   asper_config cfg;
   asper_store store;

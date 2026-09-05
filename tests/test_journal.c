@@ -47,7 +47,6 @@ static asper_record *mk_record(const char *id, asper_section s,
   r->relevance = relevance;
   r->locked = false;
   r->deprecated = false;
-  r->supersedes[0] = '\0';
   r->emb_row = -1;
   return r;
 }

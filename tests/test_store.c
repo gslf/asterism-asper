@@ -226,7 +226,6 @@ static const char HAND_IDENTITY[] =
     "  relevance: 1.0,\n"
     "  locked: true,\n"
     "  status: \"active\",\n"
-    "  supersedes: null,\n"
     "  tags: [\"persona\", \"seed\"],\n"
     "}\n";
 
@@ -255,7 +254,6 @@ TEST(handwritten_identity_file) {
   ASSERT_EQ_DBL(asper_record_relevance(out[0]), 1.0, 1e-9);
   ASSERT_TRUE(asper_record_locked(out[0]));
   ASSERT_TRUE(!asper_record_deprecated(out[0]));
-  ASSERT_TRUE(asper_record_supersedes(out[0]) == NULL);
   ASSERT_EQ_INT(asper_record_tag_count(out[0]), 2);
   ASSERT_EQ_STR(asper_record_tag(out[0], 0), "persona");
   ASSERT_EQ_STR(asper_record_tag(out[0], 1), "seed");
@@ -324,7 +322,6 @@ static const char MIXED_CONTEXT[] =
     "  relevance: 0.8,\n"
     "  locked: false,\n"
     "  status: \"active\",\n"
-    "  supersedes: null,\n"
     "  tags: [],\n"
     "}\n"
     "\n"

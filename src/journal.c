@@ -321,8 +321,8 @@ static xcdn_value_t *xstr_esc(const char *s) {
 
 /* ═══════════════════════ record -> node ═══════════════════════ */
 
-/* Build a #memory-tagged node with every field in order (project and
- * supersedes serialize as null when absent). deprecated_at is emitted after
+/* Build a #memory-tagged node with every field in order.
+ * deprecated_at is emitted after
  * status for deprecated records only: it is required to preserve the purge
  * clock across compaction and reload; active records keep the exact
  * shape. */
@@ -380,10 +380,6 @@ static xcdn_node_t *record_build_node(const asper_record *r) {
                   xcdn_value_string(r->deprecated ? "deprecated" : "active"));
   if (ok && r->deprecated)
     ok = xobj_put(obj, "deprecated_at", dt_value(r->deprecated_at));
-  if (ok)
-    ok = xobj_put(obj, "supersedes",
-                  r->supersedes[0] ? xcdn_value_uuid(r->supersedes)
-                                   : xcdn_value_null());
   if (ok) {
     xcdn_value_t *tags = xcdn_value_array();
     if (!tags) {
@@ -768,12 +764,6 @@ asper_err asper_record_from_node(asper_ctx *c, const void *xcdn_node,
     else
       REC_FAIL("record %s: status must be \"active\" or \"deprecated\"",
                r->id);
-  }
-
-  v = obj_field(obj, "supersedes");
-  if (v && v->type != XCDN_VAL_NULL) {
-    if (!val_uuid37(v, r->supersedes))
-      REC_FAIL("record %s: supersedes must be a UUID or null", r->id);
   }
 
   v = obj_field(obj, "deprecated_at");

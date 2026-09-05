@@ -493,7 +493,8 @@ static cycle_op_result cycle_do_insert(asper_ctx *c, const asper_cop *cop,
       asper_hit hit;
       char dup_id[37] = {0};
       double dup_cos = 0.0;
-      os_rwlock_rdlock(&c->lock);
+      os_rwlock_wrlock(&c->lock);
+      asper_knowledge_refresh(c);
       /* rank_by_cos: the dedup winner is the max-cosine record clearing
        * dup_threshold, not the best composite score. */
       size_t nh = asper_index_scan(
@@ -504,7 +505,7 @@ static cycle_op_result cycle_do_insert(asper_ctx *c, const asper_cop *cop,
         memcpy(dup_id, hit.rec->id, sizeof dup_id);
         dup_cos = hit.cos;
       }
-      os_rwlock_rdunlock(&c->lock);
+      os_rwlock_wrunlock(&c->lock);
       if (dup_id[0] != '\0') {
         free(vec);
         asper_access_note(c, dup_id);
@@ -541,14 +542,13 @@ static cycle_op_result cycle_do_insert(asper_ctx *c, const asper_cop *cop,
   r->evidence.observed_at = now;
   r->evidence.expires_at = now + 30 * 86400;
   snprintf(r->evidence.provenance, sizeof r->evidence.provenance,
-           "curator:scope:%s; source_refs",n_turns ? turns[0].scope : "unknown");
+           "curator:scope:%s; candidate_sources",n_turns ? turns[0].scope : "unknown");
   r->created_at = r->updated_at = r->last_access = now;
   r->access_count = 0;
   r->relevance = 0.60;
   r->locked = false;
   r->deprecated = false;
   r->deprecated_at = 0;
-  r->supersedes[0] = '\0';
   r->score = 0.0;
   r->emb_row = -1;
   if (n_turns > 0) {

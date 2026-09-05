@@ -28,8 +28,8 @@ extern "C" {
 #endif
 
 #define ASPER_VERSION_MAJOR 0
-#define ASPER_VERSION_MINOR 4
-#define ASPER_ABI_VERSION 4
+#define ASPER_VERSION_MINOR 5
+#define ASPER_ABI_VERSION 5
 #define ASPER_VERSION_PATCH 0
 
 /* Returns "major.minor.patch". */
@@ -219,6 +219,66 @@ typedef struct {
   char workspace[1024];
   char commit[65];
 } asper_evidence;
+/* Grounding establishes traceable support and current preconditions, not truth.
+ * All offsets are UTF-8 byte ranges [begin,end). Source sequences make exact
+ * reopening independent from a curator summary. Relations bind content hashes. */
+typedef enum {
+  ASPER_KNOWLEDGE_UNVERIFIED = 0, ASPER_KNOWLEDGE_CURRENT,
+  ASPER_KNOWLEDGE_STALE, ASPER_KNOWLEDGE_CONTESTED, ASPER_KNOWLEDGE_REVOKED,
+  ASPER_KNOWLEDGE_UNAVAILABLE
+} asper_knowledge_status;
+typedef enum {
+  ASPER_REL_SUPPORTS = 0, ASPER_REL_CONTRADICTS, ASPER_REL_SUPERSEDES
+} asper_relation_kind;
+typedef struct {
+  char scope[65], event_id[37];
+  unsigned long long sequence;
+  size_t source_begin, source_end, claim_begin, claim_end;
+} asper_source_span;
+typedef struct { char resource[256], version[129]; } asper_dependency;
+typedef struct {
+  asper_relation_kind kind;
+  char record_id[37], content_sha256[65];
+} asper_knowledge_link;
+typedef struct {
+  asper_source_span *sources; size_t sources_n;
+  asper_dependency *dependencies; size_t dependencies_n;
+  asper_knowledge_link *links; size_t links_n;
+  int revoked;
+  char reason[256];
+} asper_grounding;
+/* Each collection is bounded to 16 entries. The host owns the input; it is
+ * copied. expected_revision is 0 for a first definition. Stale revisions fail
+ * with BUSY. A new definition may explicitly replace or revoke earlier support.
+ * Content changes never inherit a grounding for the previous claim. */
+asper_err asper_memory_ground(asper_ctx *c, const char *id, const char *content_sha256,
+    unsigned long long expected_revision, const asper_grounding *grounding);
+asper_err asper_memory_grounding(asper_ctx *c, const char *id, asper_grounding **out,
+    unsigned long long *revision, asper_knowledge_status *status);
+void asper_grounding_free(asper_grounding *grounding);
+typedef struct {
+  char *content;
+  char content_sha256[65];
+  unsigned long long revision, sequence;
+  long long at;
+  asper_grounding *grounding;
+} asper_grounding_revision;
+/* Correction history remains available after record updates/compaction. Cursor
+ * is the global journal sequence, limit is 1..100. Records may be absent from
+ * the live table; history is not automatically pruned or erased. */
+asper_err asper_memory_grounding_history(asper_ctx *c, const char *id,
+    unsigned long long after_sequence, size_t limit, asper_grounding_revision **out,
+    size_t *out_n, unsigned long long *next_sequence);
+void asper_grounding_history_free(asper_grounding_revision *revisions, size_t n);
+const char *asper_knowledge_status_name(asper_knowledge_status status);
+asper_knowledge_status asper_record_knowledge_status(const asper_record *record);
+unsigned long long asper_record_knowledge_revision(const asper_record *record);
+/* Runtime observations are deliberately not restored from disk: a new host
+ * must re-observe resources before a dependent claim can be current. NULL/empty
+ * version means unknown. Resource identifiers are host-defined, scoped keys. */
+asper_err asper_memory_observe_dependency(asper_ctx *c, const char *resource,
+                                         const char *version);
+
 const asper_evidence *asper_record_evidence(const asper_record *r);
 asper_err asper_memory_insert_evidenced(asper_ctx *c, asper_section s,
     const char *project, const char *content, int locked,
@@ -239,11 +299,10 @@ unsigned      asper_record_access_count(const asper_record *r);
 double        asper_record_relevance(const asper_record *r);   /* stored */
 int           asper_record_locked(const asper_record *r);
 int           asper_record_deprecated(const asper_record *r);
-/* UUID of the replaced record, or NULL. */
-const char   *asper_record_supersedes(const asper_record *r);
 size_t        asper_record_tag_count(const asper_record *r);
 const char   *asper_record_tag(const asper_record *r, size_t i);
-/* Immutable event UUIDs that substantiate a curator-created record. */
+/* Candidate source event UUIDs seen by curation. They do not establish which
+ * passage supports this claim; use asper_memory_grounding for precise support. */
 size_t        asper_record_source_ref_count(const asper_record *r);
 const char   *asper_record_source_ref(const asper_record *r, size_t i);
 /* Retrieval score when the record came from asper_memory_search; else 0. */

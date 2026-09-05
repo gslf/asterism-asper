@@ -112,6 +112,12 @@ set(ASPER_SOURCES
   src/manifest.c
   src/store.c
   src/source.c
+  src/knowledge_codec.c
+  src/knowledge_store.c
+  src/knowledge_validate.c
+  src/knowledge_status.c
+  src/knowledge_api.c
+  src/knowledge_history.c
   src/event_frame.c
   src/event_log.c
   src/journal.c

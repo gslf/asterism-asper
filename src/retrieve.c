@@ -24,6 +24,14 @@ static void free_clone_array(asper_record **arr, size_t n)
   free(arr);
 }
 
+/* Expiration of a supporting record must invalidate its descendants too. */
+static asper_err refresh_knowledge(asper_ctx *c) {
+  os_rwlock_wrlock(&c->lock);
+  asper_err e = asper_knowledge_guard(c);
+  if (e == ASPER_OK) asper_knowledge_refresh(c);
+  os_rwlock_wrunlock(&c->lock); return e;
+}
+
 static asper_err retrieve_hybrid(asper_ctx *c, const char *query,
     asper_section section, const char *project, size_t k, double min_sim,
     asper_record ***out, size_t *out_n) {
@@ -55,7 +63,7 @@ static asper_err retrieve_hybrid(asper_ctx *c, const char *query,
   if (!docs || !refs || !hits) { e = ASPER_ERR_NOMEM; goto done; }
   for (size_t i=0; i<cap; i++) {
     asper_record *r = c->store.table.recs[i];
-    if (r->deprecated || (r->evidence.expires_at > 0 &&
+    if (r->knowledge_status >= ASPER_KNOWLEDGE_STALE || r->deprecated || (r->evidence.expires_at > 0 &&
         asper_clock_now(&c->clock) >= r->evidence.expires_at) ||
         (section != ASPER_SECTION_ANY && r->section != section) ||
         (r->section == ASPER_SECTION_PROJECT && (!project || !r->project ||
@@ -96,6 +104,8 @@ asper_err asper_retrieve_ex(asper_ctx *c, const char *query, asper_section s,
   *out_n = 0;
   if (!query)
     return asper_seterr(c, ASPER_ERR_INVALID, "retrieve: NULL query");
+  asper_err validity = refresh_knowledge(c);
+  if (validity != ASPER_OK) return validity;
   if (!score_is_cos)
     return retrieve_hybrid(c, query, s, project, k, min_sim, out, out_n);
   /* Cosine-only mode is reserved for deduplication, never hybrid scores. */
@@ -176,12 +186,14 @@ asper_err asper_collect_identity(asper_ctx *c, asper_record ***out,
   *out = NULL;
   *out_n = 0;
 
+  asper_err validity = refresh_knowledge(c);
+  if (validity != ASPER_OK) return validity;
   os_rwlock_rdlock(&c->lock);
   const asper_table *t = &c->store.table;
   size_t cnt = 0;
   for (size_t i = 0; i < t->n; i++) {
     const asper_record *r = t->recs[i];
-    if (r->section == ASPER_SECTION_IDENTITY && !r->deprecated &&
+    if (r->knowledge_status < ASPER_KNOWLEDGE_STALE && r->section == ASPER_SECTION_IDENTITY && !r->deprecated &&
         r->evidence.kind != ASPER_EVIDENCE_INFERRED &&
         (!r->evidence.expires_at || asper_clock_now(&c->clock)<r->evidence.expires_at))
       cnt++;
@@ -199,7 +211,7 @@ asper_err asper_collect_identity(asper_ctx *c, asper_record ***out,
   size_t n = 0;
   for (size_t i = 0; i < t->n && n < cnt; i++) {
     const asper_record *r = t->recs[i];
-    if (r->section != ASPER_SECTION_IDENTITY || r->deprecated ||
+    if (r->knowledge_status >= ASPER_KNOWLEDGE_STALE || r->section != ASPER_SECTION_IDENTITY || r->deprecated ||
         r->evidence.kind == ASPER_EVIDENCE_INFERRED ||
         (r->evidence.expires_at && asper_clock_now(&c->clock)>=r->evidence.expires_at))
       continue;
@@ -255,6 +267,8 @@ asper_err asper_collect_list(asper_ctx *c, asper_section s,
   *out = NULL;
   *out_n = 0;
 
+  asper_err validity = refresh_knowledge(c);
+  if (validity != ASPER_OK) return validity;
   os_rwlock_rdlock(&c->lock);
   const asper_table *t = &c->store.table;
   size_t cnt = 0;

@@ -288,7 +288,6 @@ static jx_value *record_json(const asper_record *r) {
   jx_value *o = jx_object();
   jx_value *tags;
   const char *proj = asper_record_project(r);
-  const char *sup = asper_record_supersedes(r);
   size_t i, tn = asper_record_tag_count(r);
   int ok = (o != NULL);
 
@@ -299,10 +298,14 @@ static jx_value *record_json(const asper_record *r) {
   ok &= jx_object_set(o, "content",
                       jx_string(asper_record_content(r))) == 0;
   ok &= jx_object_set(o, "source", jx_string(asper_record_source(r))) == 0;
+  ok &= jx_object_set(o,"knowledge_status",jx_string(asper_knowledge_status_name(asper_record_knowledge_status(r)))) == 0;
+  ok &= jx_object_set(o,"knowledge_revision",jx_int((long long)asper_record_knowledge_revision(r))) == 0;
   { const asper_evidence *ev=asper_record_evidence(r);
     static const char *const kinds[]={"declared","observed","inferred"};
     ok &= jx_object_set(o,"evidence_kind",jx_string(kinds[ev->kind]))==0;
     ok &= jx_object_set(o,"confidence",jx_double(ev->confidence))==0;
+    ok &= jx_object_set(o,"confidence_basis",jx_string(ev->confidence_kind == ASPER_CONFIDENCE_MEASURED ? "measured" :
+        ev->confidence_kind == ASPER_CONFIDENCE_HEURISTIC ? "heuristic" : "unknown")) == 0;
     ok &= jx_object_set(o,"provenance",jx_string(ev->provenance))==0;
     ok &= jx_object_set(o,"workspace",jx_string(ev->workspace))==0;
     ok &= jx_object_set(o,"commit",jx_string(ev->commit))==0;
@@ -327,7 +330,6 @@ static jx_value *record_json(const asper_record *r) {
                       jx_bool(asper_record_locked(r))) == 0;
   ok &= jx_object_set(o, "deprecated",
                       jx_bool(asper_record_deprecated(r))) == 0;
-  ok &= jx_object_set(o, "supersedes", sup ? jx_string(sup) : jx_null()) == 0;
   tags = jx_array();
   for (i = 0; i < tn; i++) {
     if (jx_array_push(tags, jx_string(asper_record_tag(r, i))) != 0) ok = 0;

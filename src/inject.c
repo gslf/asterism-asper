@@ -99,9 +99,13 @@ static asper_err append_data_text(asper_buf *b, const char *content)
 
 static asper_err evidence_label(asper_buf *b, const asper_record *r) {
   const asper_evidence *ev=&r->evidence;
-  if (ev->kind==ASPER_EVIDENCE_DECLARED) return ASPER_OK;
+  if (ev->kind==ASPER_EVIDENCE_DECLARED && !r->knowledge_revision) return ASPER_OK;
+  asper_err status = asper_buf_printf(b,"[validity=%s; grounding=%s@%llu] ",
+      asper_knowledge_status_name(r->knowledge_status),r->id,r->knowledge_revision);
+  if (status != ASPER_OK) return status;
   asper_err e=asper_buf_printf(b,"[%s; confidence=%.2f; confidence_basis=%s; at=%lld; expires=%lld; id=%s; source=",
-      ev->kind==ASPER_EVIDENCE_INFERRED ? "inferred: verify before use" : "observed",
+      ev->kind==ASPER_EVIDENCE_INFERRED ? "inferred: verify before use" :
+      ev->kind==ASPER_EVIDENCE_DECLARED ? "declared" : "observed",
       ev->confidence, ev->confidence_kind == ASPER_CONFIDENCE_MEASURED ? "measured" :
           ev->confidence_kind == ASPER_CONFIDENCE_HEURISTIC ? "heuristic" : "unknown",
       ev->observed_at,ev->expires_at,r->id);

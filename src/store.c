@@ -44,6 +44,8 @@ asper_record *asper_record_clone(const asper_record *r) {
   n->section = r->section;
   n->source = r->source;
   n->evidence = r->evidence;
+  n->knowledge_status = r->knowledge_status;
+  n->knowledge_revision = r->knowledge_revision;
   n->created_at = r->created_at;
   n->updated_at = r->updated_at;
   n->last_access = r->last_access;
@@ -52,7 +54,6 @@ asper_record *asper_record_clone(const asper_record *r) {
   n->locked = r->locked;
   n->deprecated = r->deprecated;
   n->deprecated_at = r->deprecated_at;
-  memcpy(n->supersedes, r->supersedes, sizeof(n->supersedes));
   n->score = r->score;
   n->emb_row = -1;
   n->project = asper_strdup(r->project);
