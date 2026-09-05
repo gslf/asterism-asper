@@ -20,8 +20,29 @@ typedef struct {
   asmodel_manager *manager;
   char id[ASMODEL_ID_MAX];
   asper_ctx *ctx;
-  int apply_embedding_prefix;
+  int embedding_dim;
 } model_ref;
+
+static int model_error(asper_err e) {
+  switch (e) {
+    case ASPER_OK: return ASMODEL_OK;
+    case ASPER_ERR_TIMEOUT: return ASMODEL_ERR_TIMEOUT;
+    case ASPER_ERR_CANCELLED: return ASMODEL_ERR_CANCELLED;
+    case ASPER_ERR_LIMIT: return ASMODEL_ERR_LIMIT;
+    case ASPER_ERR_NOMEM: return ASMODEL_ERR_NOMEM;
+    default: return ASMODEL_ERR_BACKEND;
+  }
+}
+static asper_err memory_error(asmodel_err e) {
+  switch (e) {
+    case ASMODEL_OK: return ASPER_OK;
+    case ASMODEL_ERR_TIMEOUT: return ASPER_ERR_TIMEOUT;
+    case ASMODEL_ERR_CANCELLED: return ASPER_ERR_CANCELLED;
+    case ASMODEL_ERR_LIMIT: return ASPER_ERR_LIMIT;
+    case ASMODEL_ERR_NOMEM: return ASPER_ERR_NOMEM;
+    default: return ASPER_ERR_MODEL;
+  }
+}
 
 static int legacy_generate(void *ud, const char *sys, const char *user,
                            const char *grammar,
@@ -31,10 +52,10 @@ static int legacy_generate(void *ud, const char *sys, const char *user,
                            int *out_in, int *out_gen) {
   legacy_provider *p = (legacy_provider *)ud;
   asper_err e;
-  if (cancel && *cancel) return -1;
+  if (cancel && *cancel) return ASMODEL_ERR_CANCELLED;
   e = p->curator.generate(p->curator.ud, sys, user, grammar, NULL,
                           params->max_tokens, params->deadline_ms, out);
-  if (e != ASPER_OK) return -1;
+  if (e != ASPER_OK) return model_error(e);
   if (out_in) *out_in = 0;
   if (out_gen) *out_gen = p->curator.count_tokens && *out ?
       p->curator.count_tokens(p->curator.ud, *out) : 0;
@@ -42,10 +63,28 @@ static int legacy_generate(void *ud, const char *sys, const char *user,
   return 0;
 }
 
-static int legacy_embed(void *ud, const char *text, int is_query, float *out) {
-  legacy_provider *p = (legacy_provider *)ud;
-  return p->embedder.embed(p->embedder.ud, text, is_query, out) == ASPER_OK
-             ? 0 : -1;
+static int legacy_embed(void *ud, const char *const *texts, size_t count, int is_query,
+                        const asmodel_embed_params *params, float *out) {
+  legacy_provider *p = ud;
+  int64_t started = os_monotonic_ms();
+  asmodel_embedding_info total = {0}; total.usage_known = 1;
+  int result = ASMODEL_OK;
+  for (size_t i = 0; i < count; i++) {
+    asmodel_embedding_info row = {0};
+    asmodel_embed_params request = *params; request.result_info = &row;
+    if (request.cancel && *request.cancel) { result = ASMODEL_ERR_CANCELLED; break; }
+    if (request.deadline_ms > 0 && (request.deadline_ms -= os_monotonic_ms()-started) <= 0) {
+      result = ASMODEL_ERR_TIMEOUT; break;
+    }
+    result = model_error(p->embedder.embed(p->embedder.ud,texts[i],is_query,&request,out+i*(size_t)p->embedder.dim));
+    total.completed += row.completed;
+    total.usage_known = total.usage_known && row.usage_known;
+    if (row.input_tokens < 0 || row.input_tokens > INT32_MAX-total.input_tokens) total.usage_known = 0;
+    else total.input_tokens += row.input_tokens;
+    if (result != ASMODEL_OK) { snprintf(total.error,sizeof total.error,"%s",row.error); break; }
+  }
+  if (params->result_info) *params->result_info = total;
+  return result;
 }
 
 static int legacy_count(void *ud, const char *text) {
@@ -79,6 +118,9 @@ static int manager_loader(void *ud, const asmodel_spec *spec,
   if (spec->embedding) {
     p->kind = 1;
     e = asper_embedder_llama_create(c, &p->embedder);
+    if (e == ASPER_OK && p->embedder.dim != spec->embedding_dim)
+      e = asper_seterr(c,ASPER_ERR_CONFIG,"embedding dimension %d differs from configured %d",
+                       p->embedder.dim,spec->embedding_dim);
     if (e == ASPER_OK) out->embed = legacy_embed;
   } else {
     p->kind = 2;
@@ -146,6 +188,25 @@ static asper_err register_local(asper_ctx *c) {
   embed.embedding = 1; embed.embedding_dim = c->cfg.embed_dim;
   embed.ram_mb = estimated_ram_mb(embed.path, c->cfg.embed_ram_mb);
   embed.vram_mb = (size_t)c->cfg.embed_vram_mb;
+  const char *values[] = {c->cfg.embed_revision,c->cfg.embed_tokenizer,c->cfg.embed_pooling,
+                         c->cfg.query_prefix,c->cfg.passage_prefix};
+  char *dest[] = {embed.pipeline.revision,embed.pipeline.tokenizer,embed.pipeline.pooling,
+                  embed.pipeline.query_prefix,embed.pipeline.document_prefix};
+  size_t sizes[] = {sizeof embed.pipeline.revision,sizeof embed.pipeline.tokenizer,sizeof embed.pipeline.pooling,
+                    sizeof embed.pipeline.query_prefix,sizeof embed.pipeline.document_prefix};
+  for (size_t i = 0; i < 5; i++) {
+    if (!values[i] || strlen(values[i]) >= sizes[i]) return ASPER_ERR_CONFIG;
+    strcpy(dest[i],values[i]);
+  }
+  if (embed.backend == ASMODEL_BACKEND_EMBEDDED) {
+    uint8_t hash[32];
+    embed.pipeline.revision[0] = 0; embed.pipeline.tokenizer[0] = 0;
+    if (asper_sha256_file(embed.path,hash) == ASPER_OK) {
+      for (size_t i = 0; i < 32; i++) snprintf(embed.pipeline.revision+2*i,3,"%02x",hash[i]);
+      strcpy(embed.pipeline.tokenizer,embed.pipeline.revision);
+    }
+    strcpy(embed.pipeline.pooling,"llama-mean-v1");
+  }
   embed.warm = 1; embed.kv_cache = 1;
   me = asmodel_manager_register(c->model_manager, &curator);
   if (me == ASMODEL_OK)
@@ -162,26 +223,14 @@ static asper_err register_local(asper_ctx *c) {
 }
 
 static asper_err managed_embed(void *ud, const char *text, int is_query,
-                               float *out) {
+                               const asmodel_embed_params *control, float *out) {
   model_ref *r = (model_ref *)ud;
-  char *input = NULL;
-  const char *send = text;
-  if (r->apply_embedding_prefix) {
-    const char *prefix = is_query ? r->ctx->cfg.query_prefix
-                                  : r->ctx->cfg.passage_prefix;
-    size_t a = prefix ? strlen(prefix) : 0, b = strlen(text);
-    input = (char *)malloc(a + b + 1);
-    if (!input) return ASPER_ERR_NOMEM;
-    if (a) memcpy(input, prefix, a);
-    memcpy(input + a, text, b + 1);
-    send = input;
-  }
-  {
-    asmodel_err e = asmodel_embed(r->manager, r->id, send, is_query, out);
-    free(input);
-    return e == ASMODEL_OK
-             ? ASPER_OK : ASPER_ERR_MODEL;
-  }
+  asmodel_embed_params params = control ? *control : (asmodel_embed_params){0};
+  if (!control) params.deadline_ms = r->ctx->cfg.recall_timeout_s > INT64_MAX/1000 ?
+      INT64_MAX : r->ctx->cfg.recall_timeout_s*1000;
+  asmodel_err e = asmodel_embed(r->manager,r->id,&text,1,is_query,&params,out,
+                               (size_t)r->embedding_dim);
+  return memory_error(e);
 }
 
 static int managed_count(void *ud, const char *text) {
@@ -204,43 +253,33 @@ static asper_err managed_generate(void *ud, const char *sys, const char *user,
                                    NULL, NULL, NULL, out, NULL, NULL);
   free(schema);
   if (e == ASMODEL_OK) return info.json_output ? asper_output_decode(out) : ASPER_OK;
-  return asper_seterr(r->ctx, ASPER_ERR_MODEL, "model '%s': %s", r->id, info.error);
+  return asper_seterr(r->ctx,memory_error(e),"model '%s': %s",r->id,info.error);
 
 }
 
 static void ref_destroy(void *ud) { free(ud); }
 
-static model_ref *make_ref(asper_ctx *c, asmodel_manager *m, const char *id,
-                           int apply_embedding_prefix) {
+static model_ref *make_ref(asper_ctx *c, asmodel_manager *m, const char *id) {
   model_ref *r;
   if (!m || !id || !id[0]) return NULL;
   r = (model_ref *)calloc(1, sizeof *r);
   if (!r) return NULL;
   r->manager = m;
   r->ctx = c;
-  r->apply_embedding_prefix = apply_embedding_prefix;
   snprintf(r->id, sizeof r->id, "%s", id);
   return r;
 }
 
-static void pipeline_hash(asper_ctx *c, const char *id, uint8_t out[32]) {
-  uint8_t base[32];
-  asper_sha256_ctx sh;
-  memset(base, 0, sizeof base);
-  if (c->cfg.embed_backend == ASMODEL_BACKEND_EMBEDDED)
-    (void)asper_sha256_file(c->cfg.embed_model_path, base);
-  else {
-    const char *model = c->cfg.embed_remote_model
-                            ? c->cfg.embed_remote_model : id;
-    asper_sha256_init(&sh);
-    asper_sha256_update(&sh, model, strlen(model));
-    if (c->cfg.embed_base_url)
-      asper_sha256_update(&sh, c->cfg.embed_base_url,
-                          strlen(c->cfg.embed_base_url));
-    asper_sha256_final(&sh, base);
-  }
-  asper_embedding_pipeline_hash(base, c->cfg.query_prefix,
-                                c->cfg.passage_prefix, out);
+/* Missing remote revisions intentionally invalidate derived vectors on reopen. */
+static asper_err pipeline_hash(asper_ctx *c, const char *id, uint8_t out[32]) {
+  char *key = NULL;
+  asmodel_err e = asmodel_manager_embedding_key(c->model_manager,id,&key);
+  if (e == ASMODEL_OK) asper_sha256(key,strlen(key),out);
+  else if (e == ASMODEL_ERR_UNSUPPORTED) {
+    char nonce[37]; asper_uuid_v4(nonce); asper_sha256(nonce,strlen(nonce),out);
+    asper_log(c,ASPER_LOG_WARN,"model","embedding pipeline revision is unknown; persistent vectors will be rebuilt on reopen");
+  } else return memory_error(e);
+  free(key); return ASPER_OK;
 }
 
 asper_err asper_models_bind(asper_ctx *c, const asper_model_binding *binding,
@@ -268,23 +307,19 @@ asper_err asper_models_bind(asper_ctx *c, const asper_model_binding *binding,
       if (strcmp(stats[i].id, cid) == 0) curator_ready = stats[i].loads > 0;
     }
   }
-  er = embed_ready ? make_ref(c, c->model_manager, eid,
-                              binding != NULL ||
-                              c->cfg.embed_backend == ASMODEL_BACKEND_OPENAI)
+  er = embed_ready ? make_ref(c,c->model_manager,eid)
                    : NULL;
-  cr = curator_ready ? make_ref(c, c->model_manager, cid, 0) : NULL;
+  cr = curator_ready ? make_ref(c,c->model_manager,cid) : NULL;
   if ((embed_ready && !er) || (curator_ready && !cr)) {
     free(er); free(cr); return ASPER_ERR_NOMEM;
   }
   if (er) {
     emb->ud = er;
     emb->dim = binding ? binding->embedding_dim : c->cfg.embed_dim;
+    er->embedding_dim = emb->dim;
     snprintf(emb->model_id, sizeof emb->model_id, "%s", eid);
-    if (binding)
-      asper_embedding_pipeline_hash(binding->embedding_model_hash,
-                                    c->cfg.query_prefix,
-                                    c->cfg.passage_prefix, emb->model_hash);
-    else pipeline_hash(c, eid, emb->model_hash);
+    asper_err e = pipeline_hash(c,eid,emb->model_hash);
+    if (e != ASPER_OK) { free(er); free(cr); memset(emb,0,sizeof *emb); return e; }
     emb->embed = managed_embed; emb->destroy = ref_destroy;
   }
   if (cr) {

@@ -59,6 +59,9 @@ void asper_config_defaults(asper_config *cfg) {
   /* multilingual-e5 is the distributed/default embedder.  Its training
    * contract requires these prefixes for every language; treating them as
    * optional silently produces lower-quality, incompatible vectors. */
+  cfg->embed_revision = asper_strdup("");
+  cfg->embed_tokenizer = asper_strdup("");
+  cfg->embed_pooling = asper_strdup("");
   cfg->query_prefix = asper_strdup("query: ");
   cfg->passage_prefix = asper_strdup("passage: ");
 
@@ -121,16 +124,11 @@ void asper_config_free(asper_config *cfg) {
   free(cfg->embed_base_url);
   free(cfg->embed_remote_model);
   free(cfg->embed_api_key_env);
+  free(cfg->embed_revision); free(cfg->embed_tokenizer); free(cfg->embed_pooling);
   free(cfg->query_prefix);
   free(cfg->passage_prefix);
   free(cfg->template_path);
-  cfg->log_path = NULL;
-  cfg->curator_model_path = NULL;
-  cfg->instruction_path = NULL;
-  cfg->embed_model_path = NULL;
-  cfg->query_prefix = NULL;
-  cfg->passage_prefix = NULL;
-  cfg->template_path = NULL;
+  memset(cfg,0,sizeof *cfg);
 }
 
 /* ─────────────────────────── key table ─────────────────────────── */
@@ -235,6 +233,9 @@ static const cfg_key CFG_KEYS[] = {
     {"embedding", "api_key_env", K_NSTR, OFF(embed_api_key_env), NULL},
     {"embedding", "ram_mb", K_NNI, OFF(embed_ram_mb), NULL},
     {"embedding", "vram_mb", K_NNI, OFF(embed_vram_mb), NULL},
+    {"embedding", "revision", K_STR, OFF(embed_revision), NULL},
+    {"embedding", "tokenizer", K_STR, OFF(embed_tokenizer), NULL},
+    {"embedding", "pooling", K_STR, OFF(embed_pooling), NULL},
     {"embedding", "query_prefix", K_STR, OFF(query_prefix), NULL},
     {"embedding", "passage_prefix", K_STR, OFF(passage_prefix), NULL},
 
@@ -431,6 +432,7 @@ static asper_err cfg_apply(asper_ctx *c, asper_config *cfg, const cfg_key *k,
 static asper_err cfg_check_defaults(asper_ctx *c, const asper_config *cfg) {
   if (!cfg->curator_model_path || !cfg->embed_model_path ||
       !cfg->curator_remote_model || !cfg->embed_remote_model ||
+      !cfg->embed_revision || !cfg->embed_tokenizer || !cfg->embed_pooling ||
       !cfg->query_prefix || !cfg->passage_prefix)
     return asper_seterr(c, ASPER_ERR_NOMEM,
                         "config: out of memory building defaults");

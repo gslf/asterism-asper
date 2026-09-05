@@ -2,8 +2,8 @@
  * retrieve.c — query-side selection.
  *
  * asper_retrieve embeds the query on the calling thread (the embedder
- * backend owns a dedicated llama context for is_query != 0, so this never
- * contends with the worker), scans the flat index under the read lock and
+ * manager serializes requests and enforces the remaining duration), scans
+ * the flat index under the read lock and
  * returns deep clones of the hits with .score set. The collect_* helpers
  * return deep clones for injection (in identity order) and for
  * asper_memory_list. All returned arrays are released with
@@ -37,7 +37,7 @@ static asper_err retrieve_hybrid(asper_ctx *c, const char *query,
   if (c->has_embedder && dim > 0) {
     vec = calloc((size_t)dim, sizeof *vec);
     if (!vec) return ASPER_ERR_NOMEM;
-    if (c->embedder.embed(c->embedder.ud, query, 1, vec) != ASPER_OK) {
+    if (c->embedder.embed(c->embedder.ud, query, 1, NULL, vec) != ASPER_OK) {
       free(vec); vec = NULL; /* lexical fallback on model outage */
     }
   }
@@ -112,7 +112,7 @@ asper_err asper_retrieve_ex(asper_ctx *c, const char *query, asper_section s,
   if (!qvec)
     return asper_seterr(c, ASPER_ERR_NOMEM, "retrieve: out of memory");
 
-  asper_err e = c->embedder.embed(c->embedder.ud, query, 1, qvec);
+  asper_err e = c->embedder.embed(c->embedder.ud, query, 1, NULL, qvec);
   if (e != ASPER_OK) {
     free(qvec);
     return asper_seterr(c, e, "retrieve: query embedding failed");

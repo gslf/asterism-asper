@@ -120,6 +120,21 @@ void asper_llama_backend_init(void)
 #define ELL_N_CTX 512 /* modest embedding window; inputs are truncated */
 
 typedef struct {
+  os_mutex lock;
+  volatile int *cancel;
+  int64_t deadline;
+} ell_control;
+static void ell_control_set(ell_control *c, volatile int *cancel, int64_t deadline) {
+  os_mutex_lock(&c->lock); c->cancel = cancel; c->deadline = deadline; os_mutex_unlock(&c->lock);
+}
+static bool ell_abort(void *data) {
+  ell_control *c = data;
+  os_mutex_lock(&c->lock);
+  bool stop = (c->cancel && *c->cancel) || (c->deadline && os_monotonic_ms() >= c->deadline);
+  os_mutex_unlock(&c->lock); return stop;
+}
+
+typedef struct {
   struct llama_model *model;
   const struct llama_vocab *vocab;
   struct llama_context *lctx_passage; /* any thread, guarded by p_mu:
@@ -129,11 +144,10 @@ typedef struct {
   struct llama_context *lctx_query;   /* any thread, guarded by q_mu   */
   os_mutex q_mu;
   os_mutex p_mu;
+  ell_control query_control, passage_control;
   int dim;
   int n_ctx;
   bool encoder_only;
-  char *query_prefix;   /* owned copies: the backend must not depend on */
-  char *passage_prefix; /* cfg lifetime                                 */
 } ell_ud;
 
 /* Tokenize text into a malloc'd array using the negative-return resize
@@ -175,10 +189,9 @@ static asper_err ell_tokenize(const struct llama_vocab *vocab,
 }
 
 static asper_err ell_embed_one(ell_ud *u, struct llama_context *lctx,
-                               const char *prefix, const char *text,
-                               float *out)
+                               const char *text,
+                               asmodel_embedding_info *info, float *out)
 {
-  char *full = NULL;
   const char *input = text;
   llama_token *tok = NULL;
   int32_t n_tok = 0;
@@ -189,16 +202,6 @@ static asper_err ell_embed_one(ell_ud *u, struct llama_context *lctx,
 
   if (input == NULL)
     input = "";
-  if (prefix != NULL && prefix[0] != '\0') {
-    size_t pl = strlen(prefix), tl = strlen(input);
-    full = (char *)malloc(pl + tl + 1);
-    if (full == NULL)
-      return ASPER_ERR_NOMEM;
-    memcpy(full, prefix, pl);
-    memcpy(full + pl, input, tl + 1);
-    input = full;
-  }
-
   e = ell_tokenize(u->vocab, input, true, false, &tok, &n_tok);
   if (e == ASPER_OK && n_tok == 0) {
     /* Some vocabs tokenize "" to nothing even with add_special; embed a
@@ -207,13 +210,11 @@ static asper_err ell_embed_one(ell_ud *u, struct llama_context *lctx,
     if (e == ASPER_OK && n_tok == 0)
       e = ASPER_ERR_MODEL;
   }
-  free(full);
   if (e != ASPER_OK) {
     free(tok);
     return e;
   }
-  if (n_tok > u->n_ctx)
-    n_tok = u->n_ctx; /* truncate: whole-input embedding is best effort */
+  if (n_tok > u->n_ctx) { free(tok); return ASPER_ERR_LIMIT; }
 
   /* Reset any sequence state left by the previous call (NULL-safe for
    * memory-less encoder contexts). */
@@ -222,6 +223,7 @@ static asper_err ell_embed_one(ell_ud *u, struct llama_context *lctx,
   /* llama_batch_get_one: seq 0, auto positions; with embeddings enabled
    * every token is an output, which mean pooling requires. */
   {
+    if (info) info->usage_known = 0;
     struct llama_batch batch = llama_batch_get_one(tok, n_tok);
     rc = u->encoder_only ? asper_llg_encode(lctx, batch)
                          : asper_llg_decode(lctx, batch);
@@ -238,31 +240,37 @@ static asper_err ell_embed_one(ell_ud *u, struct llama_context *lctx,
   for (i = 0; i < u->dim; i++)
     norm += (double)emb[i] * (double)emb[i];
   norm = sqrt(norm);
-  if (norm > 0.0) {
+  if (norm > 0.0 && isfinite(norm)) {
     for (i = 0; i < u->dim; i++)
       out[i] = (float)((double)emb[i] / norm);
   } else {
-    for (i = 0; i < u->dim; i++)
-      out[i] = 0.0f;
+    return ASPER_ERR_MODEL;
   }
+  if (info) { info->input_tokens = n_tok; info->usage_known = 1; info->completed = 1; }
   return ASPER_OK;
 }
 
 static asper_err ell_embed(void *ud, const char *text, int is_query,
-                           float *out)
-{
-  ell_ud *u = (ell_ud *)ud;
-  asper_err e;
-
-  if (is_query) {
-    os_mutex_lock(&u->q_mu);
-    e = ell_embed_one(u, u->lctx_query, u->query_prefix, text, out);
-    os_mutex_unlock(&u->q_mu);
-  } else {
-    os_mutex_lock(&u->p_mu);
-    e = ell_embed_one(u, u->lctx_passage, u->passage_prefix, text, out);
-    os_mutex_unlock(&u->p_mu);
-  }
+                           const asmodel_embed_params *params, float *out) {
+  ell_ud *u = ud;
+  asmodel_embed_params request = params ? *params : (asmodel_embed_params){0};
+  asmodel_embedding_info *info = request.result_info;
+  int64_t started = os_monotonic_ms();
+  int64_t deadline = request.deadline_ms > 0 ?
+      (request.deadline_ms > INT64_MAX-started ? INT64_MAX : started+request.deadline_ms) : 0;
+  os_mutex *lock = is_query ? &u->q_mu : &u->p_mu;
+  ell_control *control = is_query ? &u->query_control : &u->passage_control;
+  if (info) { memset(info,0,sizeof *info); info->usage_known = 1; }
+  os_mutex_lock(lock);
+  ell_control_set(control,request.cancel,deadline);
+  asper_err e = ASPER_OK;
+  if (request.cancel && *request.cancel) e = ASPER_ERR_CANCELLED;
+  else if (deadline && os_monotonic_ms() >= deadline) e = ASPER_ERR_TIMEOUT;
+  else e = ell_embed_one(u,is_query ? u->lctx_query : u->lctx_passage,
+      text,info,out);
+  if (request.cancel && *request.cancel) e = ASPER_ERR_CANCELLED;
+  else if (deadline && os_monotonic_ms() >= deadline) e = ASPER_ERR_TIMEOUT;
+  ell_control_set(control,NULL,0); os_mutex_unlock(lock);
   return e;
 }
 
@@ -280,8 +288,8 @@ static void ell_destroy(void *ud)
     llama_model_free(u->model);
   os_mutex_destroy(&u->q_mu);
   os_mutex_destroy(&u->p_mu);
-  free(u->query_prefix);
-  free(u->passage_prefix);
+  os_mutex_destroy(&u->query_control.lock);
+  os_mutex_destroy(&u->passage_control.lock);
   free(u);
 }
 
@@ -326,6 +334,8 @@ asper_err asper_embedder_llama_create(asper_ctx *c, asper_embedder *out)
     return asper_seterr(c, ASPER_ERR_NOMEM, "out of memory");
   os_mutex_init(&u->q_mu);
   os_mutex_init(&u->p_mu);
+  os_mutex_init(&u->query_control.lock);
+  os_mutex_init(&u->passage_control.lock);
 
   mparams = llama_model_default_params();
   /* -1 = every layer in VRAM (llama.h: negative means all); 0 keeps
@@ -361,12 +371,15 @@ asper_err asper_embedder_llama_create(asper_ctx *c, asper_embedder *out)
   cparams.embeddings = true;
   cparams.pooling_type = LLAMA_POOLING_TYPE_MEAN;
 
+  cparams.abort_callback = ell_abort;
+  cparams.abort_callback_data = &u->passage_control;
   u->lctx_passage = llama_init_from_model(u->model, cparams);
   if (u->lctx_passage == NULL) {
     e = asper_seterr(c, ASPER_ERR_MODEL,
                      "failed to create embedding context: %s", path);
     goto fail;
   }
+  cparams.abort_callback_data = &u->query_control;
   u->lctx_query = llama_init_from_model(u->model, cparams);
   if (u->lctx_query == NULL) {
     e = asper_seterr(c, ASPER_ERR_MODEL,
@@ -381,33 +394,8 @@ asper_err asper_embedder_llama_create(asper_ctx *c, asper_embedder *out)
   if (u->n_ctx <= 0)
     u->n_ctx = ELL_N_CTX;
 
-  u->query_prefix =
-      asper_strdup(c->cfg.query_prefix != NULL ? c->cfg.query_prefix : "");
-  u->passage_prefix =
-      asper_strdup(c->cfg.passage_prefix != NULL ? c->cfg.passage_prefix
-                                                 : "");
-  if (u->query_prefix == NULL || u->passage_prefix == NULL) {
-    e = asper_seterr(c, ASPER_ERR_NOMEM, "out of memory");
-    goto fail;
-  }
-
   ell_model_id(path, out->model_id);
-  e = asper_sha256_file(path, out->model_hash);
-  if (e != ASPER_OK) {
-    e = asper_seterr(c, e, "failed to hash embedding model file: %s", path);
-    goto fail;
-  }
-  /* Vectors are a product of the weights AND preprocessing.  Store a
-   * pipeline hash in the existing cache/manifest hash field so changing a
-   * model-owned prefix cannot reuse an incompatible index.  Include role
-   * separators because query and passage preprocessing are asymmetric. */
-  {
-    uint8_t weights_hash[32];
-    memcpy(weights_hash, out->model_hash, sizeof weights_hash);
-    asper_embedding_pipeline_hash(weights_hash, u->query_prefix,
-                                  u->passage_prefix, out->model_hash);
-  }
-
+  /* The manager owns the complete pipeline identity and preprocessing. */
   out->ud = u;
   out->dim = u->dim;
   out->embed = ell_embed;

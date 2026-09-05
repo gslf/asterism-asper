@@ -136,10 +136,7 @@ void asper_sha256_update(asper_sha256_ctx *ctx, const void *data, size_t len);
 void asper_sha256_final(asper_sha256_ctx *ctx, uint8_t out[32]);
 void asper_sha256(const void *data, size_t len, uint8_t out[32]);
 asper_err asper_sha256_file(const char *path, uint8_t out[32]);
-void asper_embedding_pipeline_hash(const uint8_t weights_hash[32],
-                                   const char *query_prefix,
-                                   const char *passage_prefix,
-                                   uint8_t out[32]);
+
 
 asper_err asper_memory_render_project(asper_ctx *c, const char *base,
     const char *query, const char *project, char **out);
@@ -241,7 +238,8 @@ typedef struct {
   char *embed_base_url, *embed_remote_model, *embed_api_key_env;
   int embed_ram_mb, embed_vram_mb;
   int models_max_resident, models_max_ram_mb, models_max_vram_mb;
-  char *query_prefix;          /* "" default */
+  char *embed_revision, *embed_tokenizer, *embed_pooling;
+  char *query_prefix;          /* standalone E5 default; host manager owns bound pipelines */
   char *passage_prefix;
   /* budgets */
   int identity_tokens, context_tokens, project_tokens;
@@ -474,11 +472,11 @@ typedef struct {
   /* SHA-256 of the complete embedding pipeline (weights plus model-owned
    * query/passage preprocessing), used to invalidate persisted vectors. */
   uint8_t model_hash[32];
-  /* Callable from ANY thread for both kinds; backends serialize
-   * internally (separate query/passage contexts so queries never wait on
-   * passage work). is_query != 0 marks hot-path query embedding. out has
+  /* Callable from any thread; the model manager serializes backend requests.
+   * is_query selects preprocessing and the decoding context. out has
    * room for dim floats; result L2-normalized. */
-  asper_err (*embed)(void *ud, const char *text, int is_query, float *out);
+  asper_err (*embed)(void *ud, const char *text, int is_query,
+                     const asmodel_embed_params *params, float *out);
   void (*destroy)(void *ud);
 } asper_embedder;
 

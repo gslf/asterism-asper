@@ -39,9 +39,11 @@ void fake_embed_text(const char *text, float out[FAKE_EMBED_DIM]) {
 }
 
 static asper_err fake_embed_cb(void *ud, const char *text, int is_query,
-                               float *out) {
+                               const asmodel_embed_params *params, float *out) {
   (void)ud;
   (void)is_query;
+  if (params && params->cancel && *params->cancel) return ASPER_ERR_CANCELLED;
+  if (params && params->result_info) { memset(params->result_info,0,sizeof *params->result_info); params->result_info->completed = 1; }
   if (!text || !out) return ASPER_ERR_INVALID;
   fake_embed_text(text, out);
   return ASPER_OK;

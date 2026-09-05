@@ -154,3 +154,16 @@ claim kind, confidence, provenance, workspace/revision and expiry;
 `asper_memory_insert_evidenced` records host-supplied evidence. Curator hypotheses
 expire and cannot overwrite host declarations/observations. Explicit-project
 context/recall APIs support concurrent hosts without switching shared state.
+
+### Shared embedding pipeline
+
+Asper ABI 4 borrows preprocessing and pipeline identity from the host's asmodel
+manager. `asper_model_binding` identifies the model and dimension; it no longer
+accepts a separately supplied cache hash. Standalone configuration retains
+`embedding.query_prefix` / `passage_prefix` and adds `revision`, `tokenizer` and
+`pooling` for remote pipelines. Empty revision metadata forces vector rebuilds
+on reopen. Embedded identities use the GGUF hash and mean pooling; oversized
+inputs return `ASPER_ERR_LIMIT` instead of truncating. Manager calls support
+batch receipts, cancellation and remaining duration. Existing public memory
+operations use the configured recall timeout unless an internal caller supplies
+more specific controls; turn-wide cancellation propagation is still separate.

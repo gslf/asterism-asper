@@ -39,6 +39,9 @@ const char *asper_err_name(asper_err e) {
   case ASPER_ERR_INVALID: return "ASPER_ERR_INVALID";
   case ASPER_ERR_BUSY: return "ASPER_ERR_BUSY";
   case ASPER_ERR_NOMEM: return "ASPER_ERR_NOMEM";
+  case ASPER_ERR_TIMEOUT: return "ASPER_ERR_TIMEOUT";
+  case ASPER_ERR_CANCELLED: return "ASPER_ERR_CANCELLED";
+  case ASPER_ERR_LIMIT: return "ASPER_ERR_LIMIT";
   default: return "ASPER_ERR_UNKNOWN";
   }
 }
@@ -210,7 +213,7 @@ static void apply_index_embed(asper_ctx *c, asper_record *rec) {
               rec->id);
     return;
   }
-  e = c->embedder.embed(c->embedder.ud, rec->content, 0, vec);
+  e = c->embedder.embed(c->embedder.ud, rec->content, 0, NULL, vec);
   if (e != ASPER_OK) {
     asper_log(c, ASPER_LOG_WARN, "embed", "embedding failed for %s: %s",
               rec->id, asper_err_name(e));
@@ -421,7 +424,7 @@ asper_err asper_apply_op(asper_ctx *c, asper_op *op, bool from_curator) {
       if (!prepared_vec)
         embed_e = ASPER_ERR_NOMEM;
       else
-        embed_e = c->embedder.embed(c->embedder.ud, embed_text, 0,
+        embed_e = c->embedder.embed(c->embedder.ud, embed_text, 0, NULL,
                                     prepared_vec);
     }
   }
@@ -736,7 +739,7 @@ static asper_err asper_open_impl(const asper_open_params *p,
         if (stale[i] >= c->store.table.n) continue;
         r = c->store.table.recs[stale[i]];
         if (!r || r->deprecated) continue;
-        ee = c->embedder.embed(c->embedder.ud, r->content, 0, vec);
+        ee = c->embedder.embed(c->embedder.ud, r->content, 0, NULL, vec);
         if (ee != ASPER_OK) {
           asper_log(c, ASPER_LOG_WARN, "embed", "re-embed failed for %s: %s",
                     r->id, asper_err_name(ee));

@@ -484,7 +484,7 @@ static cycle_op_result cycle_do_insert(asper_ctx *c, const asper_cop *cop,
       count_drop(c, what, "out of memory");
       return CYCLE_OP_REJECTED;
     }
-    asper_err erc = c->embedder.embed(c->embedder.ud, text, 0, vec);
+    asper_err erc = c->embedder.embed(c->embedder.ud, text, 0, NULL, vec);
     if (erc != ASPER_OK) {
       asper_log(c, ASPER_LOG_WARN, "curator",
                 "dedup embedding failed (%s); inserting without dedup",

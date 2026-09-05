@@ -278,8 +278,8 @@ TEST(fake_embedder_model) {
   ASSERT_EQ_INT(e.dim, 16);
   ASSERT_EQ_STR(e.model_id, "fake-embedder");
   for (i = 0; i < 32; i++) ASSERT_EQ_INT(e.model_hash[i], 0x11);
-  ASSERT_OK(e.embed(e.ud, "green tea", 1, a));
-  ASSERT_OK(e.embed(e.ud, "tea green GREEN tea", 0, b));
+  ASSERT_OK(e.embed(e.ud, "green tea", 1, NULL, a));
+  ASSERT_OK(e.embed(e.ud, "tea green GREEN tea", 0, NULL, b));
   for (i = 0; i < FAKE_EMBED_DIM; i++) {
     dot += (double)a[i] * b[i];
     na += (double)a[i] * a[i];
