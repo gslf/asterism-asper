@@ -40,6 +40,7 @@
 #define os_rwlock_wrlock      asper_x_rwlock_wrlock
 #define os_rwlock_wrunlock    asper_x_rwlock_wrunlock
 #define os_file_replace       asper_x_file_replace
+#define os_sync_parent        asper_x_sync_parent
 #define os_fsync              asper_x_fsync
 #define os_mkdir_p            asper_x_mkdir_p
 #define os_file_exists        asper_x_file_exists
@@ -125,6 +126,8 @@ void os_rwlock_wrunlock(os_rwlock *l);
 asper_err os_file_replace(const char *src, const char *dst);
 /* fsync/_commit an open stream. */
 asper_err os_fsync(FILE *f);
+/* POSIX directory durability; Windows has no equivalent portable guarantee. */
+asper_err os_sync_parent(const char *path);
 /* Create directory and any missing parents. Existing dir is OK. */
 asper_err os_mkdir_p(const char *path);
 int       os_file_exists(const char *path);   /* 1 = yes */

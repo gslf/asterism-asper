@@ -1,10 +1,9 @@
 /*
  * manifest.c — manifest.xcdn read/write via xCDN-C.
  *
- * Load: a missing file initializes a fresh manifest (store_version 1,
+ * Load: a missing file initializes a fresh manifest (store_version 2,
  * created_at = ctx clock now, no embedding block) and persists it at once.
- * The #asper_manifest tag is optional on read; a store_version greater than
- * ours fails with ASPER_ERR_PARSE ("newer store").
+ * Only store_version 2 is accepted. Migration is never implicit.
  *
  * Save: the document is built programmatically, tagged #asper_manifest,
  * serialized pretty and written atomically (tmp + fsync + os_file_replace).
@@ -18,6 +17,7 @@
 
 #include "asper_internal.h"
 #include "xcdn.h"
+#include "store_files.h"
 
 /* ─────────────────────────── helpers ─────────────────────────── */
 
@@ -103,13 +103,14 @@ asper_err asper_manifest_load(asper_ctx *c, asper_manifest *m) {
   const xcdn_node_t *root;
   const xcdn_value_t *obj;
   size_t i;
+  bool version_seen = false;
   asper_err e;
 
   if (!m)
     return asper_seterr(c, ASPER_ERR_INVALID, "manifest: null out param");
 
   memset(m, 0, sizeof *m);
-  m->store_version = 1;
+  m->store_version = 2;
 
   path = c->store.manifest_path;
   if (!path)
@@ -123,7 +124,7 @@ asper_err asper_manifest_load(asper_ctx *c, asper_manifest *m) {
     return e;
   }
 
-  e = os_read_file(path, &text, NULL);
+  e = asper_store_file_read(path, false, 65536, &text, NULL);
   if (e != ASPER_OK)
     return asper_seterr(c, e, "manifest: cannot read %s", path);
 
@@ -161,19 +162,14 @@ asper_err asper_manifest_load(asper_ctx *c, asper_manifest *m) {
                          xcdn_value_type_str(v->type));
         goto done;
       }
-      if (v->data.integer > 1) {
+      if (v->data.integer != 2) {
         e = asper_seterr(c, ASPER_ERR_PARSE,
-                         "manifest: newer store (store_version %lld > 1); "
-                         "refusing to open",
+                         "manifest: unsupported store_version %lld (expected 2)",
                          (long long)v->data.integer);
         goto done;
       }
-      if (v->data.integer < 1) {
-        e = asper_seterr(c, ASPER_ERR_PARSE,
-                         "manifest: invalid store_version %lld",
-                         (long long)v->data.integer);
-        goto done;
-      }
+      if (version_seen) { e = ASPER_ERR_PARSE; goto done; }
+      version_seen = true;
       m->store_version = (int)v->data.integer;
     } else if (strcmp(key, "created_at") == 0) {
       if (!value_time(v, &m->created_at)) {
@@ -201,7 +197,7 @@ asper_err asper_manifest_load(asper_ctx *c, asper_manifest *m) {
       asper_log(c, ASPER_LOG_WARN, "store", "manifest: unknown key %s", key);
     }
   }
-  e = ASPER_OK;
+  e = version_seen ? ASPER_OK : ASPER_ERR_PARSE;
 
 done:
   xcdn_document_free(doc);

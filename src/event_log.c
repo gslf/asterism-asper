@@ -147,6 +147,7 @@ asper_err asper_event_log_append(const char *path, asper_event *event) {
   err = asper_event_frame_write(f, event);
   if (err == ASPER_OK && (fflush(f) || os_fsync(f) != ASPER_OK))
     err = ASPER_ERR_IO;
+  if (err == ASPER_OK && !bytes) err = os_sync_parent(path);
   long end = ftell(f);
   if (fclose(f) && err == ASPER_OK) err = ASPER_ERR_IO;
   if (err != ASPER_OK) return err; /* An uncertain durable append is not replayed. */

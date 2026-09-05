@@ -5,6 +5,7 @@
 
 #include "asper_internal.h"
 #include "fakes.h"
+#include "event_log.h"
 
 #define T0 1785319920LL /* 2026-07-29T10:12:00Z */
 
@@ -51,12 +52,27 @@ static asper_record *mk_record(const char *id, asper_section s,
   return r;
 }
 
-/* Serialize op as one journal line into buf; frees the op members. */
+/* Build actual checked frames, independent of the append/projection path. */
 static int put_line(asper_buf *buf, asper_op *op) {
-  int ok = asper_op_serialize(op, buf) == ASPER_OK &&
-           asper_buf_appendc(buf, '\n') == ASPER_OK;
-  asper_op_free(op);
-  return ok;
+  static unsigned long long sequence;
+  if (!buf->len) sequence = 0;
+  asper_buf text; asper_buf_init(&text);
+  asper_event event = {0};
+  FILE *f = tmpfile();
+  int ok = f && asper_op_serialize(op,&text) == ASPER_OK;
+  if (ok) {
+    event.text = text.data; event.sequence = ++sequence; event.at = op->at;
+    event.kind = ASPER_EVENT_DIAGNOSTIC; asper_uuid_v4(event.id);
+    ok = asper_event_frame_write(f,&event) == ASPER_OK;
+  }
+  if (ok) {
+    rewind(f); char chunk[1024]; size_t n;
+    while ((n = fread(chunk,1,sizeof chunk,f)) > 0)
+      if (asper_buf_append(buf,chunk,n) != ASPER_OK) { ok = 0; break; }
+    if (ferror(f)) ok = 0;
+  }
+  if (f) fclose(f);
+  asper_buf_free(&text); asper_op_free(op); return ok;
 }
 
 /* Build the 8-op journal exercising every op kind. Returns heap text. */
@@ -127,7 +143,8 @@ static char *build_full_journal(size_t *out_len, size_t *out_lines) {
   lines = 0;
   for (i = 0; i < buf.len; i++)
     if (buf.data[i] == '\n') lines++;
-  if (lines != 8) goto fail;
+  if (lines != 16) goto fail;
+  lines /= 2;
 
   *out_len = buf.len;
   *out_lines = lines;
@@ -208,7 +225,7 @@ TEST(torn_tail_truncated_and_recovered) {
   ASSERT_OK(asper_buf_append(&buf, journal, jlen));
   free(journal);
   /* a crash mid-append: half a value, no trailing newline */
-  ASSERT_OK(asper_buf_appends(&buf, "#op { kind: \"ins"));
+  ASSERT_OK(asper_buf_appends(&buf, "AEV2 "));
   snprintf(path, sizeof path, "%s/journal.xcdn", root);
   ASSERT_OK(os_write_file(path, buf.data, buf.len));
   asper_buf_free(&buf);
@@ -275,15 +292,12 @@ TEST(midfile_corruption_fails_open) {
   asper_test_rmtree(root);
 }
 
-TEST(replay_skips_unappliable_ops) {
-  /* An op on a missing record is logged and skipped; replay never fails on
-   * apply errors, only on parse errors. */
+TEST(replay_rejects_unappliable_ops) {
+  /* A checked frame with an impossible transition still invalidates recovery. */
   char root[256], path[512];
   asper_buf buf;
   asper_op op;
   asper_ctx *c;
-  asper_record **out = NULL;
-  size_t n = 0;
   ASSERT_TRUE(asper_test_tmpdir(root));
   fake_clock_set(&g_clk, T0);
   fake_curator_init(&g_cur);
@@ -307,21 +321,75 @@ TEST(replay_skips_unappliable_ops) {
   asper_buf_free(&buf);
 
   c = open_store(root);
-  ASSERT_TRUE(c != NULL);
-  ASSERT_OK(asper_memory_list(c, ASPER_SECTION_ANY, NULL, 1, &out, &n));
-  ASSERT_EQ_INT(n, 1);
-  ASSERT_EQ_STR(asper_record_content(out[0]), "Still applied fine");
-  asper_records_free(out, n);
-  asper_close(c);
+  ASSERT_TRUE(c == NULL);
   fake_curator_dispose(&g_cur);
   asper_test_rmtree(root);
 }
 
+TEST(short_write_and_flush_roll_back) {
+  for (int fault = 1; fault <= 2; fault++) {
+    char root[256], path[512], id[37];
+    ASSERT_TRUE(asper_test_tmpdir(root));
+    fake_clock_set(&g_clk,T0); fake_curator_init(&g_cur);
+    asper_ctx *c = open_store(root); ASSERT_TRUE(c != NULL);
+    ASSERT_OK(asper_memory_insert(c,ASPER_SECTION_CONTEXT,NULL,"Before fault",0,id));
+    snprintf(path,sizeof path,"%s/journal.xcdn",root);
+    uint64_t before, after; ASSERT_OK(os_file_size(path,&before));
+    c->store.journal_fault = fault;
+    ASSERT_ERR(asper_memory_insert(c,ASPER_SECTION_CONTEXT,NULL,"Retracted",0,id),ASPER_ERR_IO);
+    ASSERT_OK(os_file_size(path,&after)); ASSERT_EQ_INT(before,after);
+    ASSERT_TRUE(!c->store.poisoned);
+    ASSERT_OK(asper_memory_insert(c,ASPER_SECTION_CONTEXT,NULL,"After recovery",0,id));
+    asper_close(c); c = open_store(root); ASSERT_TRUE(c != NULL);
+    asper_record **rows = NULL; size_t n;
+    ASSERT_OK(asper_memory_list(c,ASPER_SECTION_ANY,NULL,0,&rows,&n)); ASSERT_EQ_INT(n,2);
+    asper_records_free(rows,n); asper_close(c);
+    fake_curator_dispose(&g_cur); asper_test_rmtree(root);
+  }
+}
+
+TEST(uncertain_sync_requires_reopen) {
+  char root[256], path[512], id[37];
+  ASSERT_TRUE(asper_test_tmpdir(root));
+  fake_clock_set(&g_clk,T0); fake_curator_init(&g_cur);
+  asper_ctx *c = open_store(root); ASSERT_TRUE(c != NULL);
+  ASSERT_OK(asper_memory_insert(c,ASPER_SECTION_CONTEXT,NULL,"Acknowledged",0,id));
+  c->store.journal_fault = 3;
+  ASSERT_ERR(asper_memory_insert(c,ASPER_SECTION_CONTEXT,NULL,"Uncertain",0,id),ASPER_ERR_IO);
+  ASSERT_TRUE(c->store.poisoned);
+  ASSERT_ERR(asper_memory_insert(c,ASPER_SECTION_CONTEXT,NULL,"Must not append",0,id),ASPER_ERR_IO);
+  ASSERT_ERR(asper_store_compact(c),ASPER_ERR_IO);
+  snprintf(path,sizeof path,"%s/journal.xcdn",root);
+  uint64_t before,after; ASSERT_OK(os_file_size(path,&before));
+  asper_close(c); ASSERT_OK(os_file_size(path,&after)); ASSERT_EQ_INT(before,after);
+  c = open_store(root); ASSERT_TRUE(c != NULL);
+  asper_record **rows = NULL; size_t n;
+  ASSERT_OK(asper_memory_list(c,ASPER_SECTION_ANY,NULL,0,&rows,&n)); ASSERT_EQ_INT(n,2);
+  asper_records_free(rows,n); asper_close(c);
+  fake_curator_dispose(&g_cur); asper_test_rmtree(root);
+}
+
+TEST(complete_payload_corruption_is_never_discarded) {
+  char root[256],path[512]; size_t n,lines; uint64_t after;
+  ASSERT_TRUE(asper_test_tmpdir(root));
+  fake_clock_set(&g_clk,T0); fake_curator_init(&g_cur);
+  char *journal = build_full_journal(&n,&lines); ASSERT_TRUE(journal != NULL);
+  char *claim = strstr(journal,"green tea"); ASSERT_TRUE(claim != NULL); claim[0] = 'G';
+  snprintf(path,sizeof path,"%s/journal.xcdn",root);
+  ASSERT_OK(os_write_file(path,journal,n)); free(journal);
+  ASSERT_TRUE(open_store(root) == NULL);
+  ASSERT_OK(os_file_size(path,&after)); ASSERT_EQ_INT(after,n);
+  fake_curator_dispose(&g_cur); asper_test_rmtree(root);
+}
+
 TEST_LIST = {
+    TEST_ENTRY(short_write_and_flush_roll_back),
+    TEST_ENTRY(uncertain_sync_requires_reopen),
+    TEST_ENTRY(complete_payload_corruption_is_never_discarded),
     TEST_ENTRY(op_roundtrip_all_kinds),
     TEST_ENTRY(torn_tail_truncated_and_recovered),
     TEST_ENTRY(midfile_corruption_fails_open),
-    TEST_ENTRY(replay_skips_unappliable_ops),
+    TEST_ENTRY(replay_rejects_unappliable_ops),
 };
 
 RUN_ALL_TESTS()

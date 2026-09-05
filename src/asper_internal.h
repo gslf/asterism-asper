@@ -334,13 +334,15 @@ asper_err asper_journal_replay(asper_ctx *c, const char *path,
  * audit.xcdn when enabled. Increments c->store.journal_ops. */
 asper_err asper_journal_append(asper_ctx *c, const asper_op *op,
                                bool force_sync);
-/* fsync journal stream if open. */
+/* Sync the journal; uncertain failure poisons the store until reopen. */
 asper_err asper_journal_sync(asper_ctx *c);
+/* Caller holds c->lock for writing. */
+void asper_store_poison(asper_ctx *c);
 
 /* ═══════════════════════ manifest.c ═══════════════════════ */
 
 typedef struct {
-  int store_version;               /* 1 */
+  int store_version;               /* 2: checked operation frames */
   asper_time created_at;
   asper_time last_compaction;      /* 0 = never */
   char embed_model_id[128];
@@ -350,12 +352,14 @@ typedef struct {
 } asper_manifest;
 
 /* Read manifest.xcdn; missing file => initialized manifest with
- * store_version 1, created_at = now, written to disk. Greater
- * store_version => ASPER_ERR_PARSE. */
+ * store_version 2, created_at = now, written to disk. Other
+ * versions => ASPER_ERR_PARSE; migration is never implicit. */
 asper_err asper_manifest_load(asper_ctx *c, asper_manifest *m);
 asper_err asper_manifest_save(asper_ctx *c, const asper_manifest *m);
 
 /* ═══════════════════════ store.c ═══════════════════════ */
+#define ASPER_RECORD_LIMIT 65536u
+#define ASPER_PROJECT_LIMIT 4093u
 
 typedef struct {
   char *root;              /* owned copy of memory_root */
@@ -368,6 +372,9 @@ typedef struct {
   asper_manifest manifest;
   size_t journal_ops;      /* ops in journal since last compaction */
   FILE *journal_fp;        /* append stream, owned */
+  bool poisoned;          /* Uncertain persistence requires reopen. */
+  asper_err (*compact_checkpoint)(int stage); /* Private fault/crash probe, normally NULL. */
+  int journal_fault;      /* Private one-shot I/O fault injection: 1=write, 2=flush, 3=sync. */
   FILE *audit_fp;          /* NULL unless cfg.audit_log */
 } asper_store;
 
@@ -509,7 +516,7 @@ void asper_models_shutdown(asper_ctx *c);
 
 /* ═══════════════════════ retrieve.c ═══════════════════════ */
 
-/* Embed the query (is_query=1, caller thread), scan under the read lock,
+/* Embed the query (is_query=1, caller thread), refresh validity and scan under the lock,
  * return CLONES with .score set, ordered deterministically. No embedder available =>
  * 0 results, ASPER_OK. s may be ASPER_SECTION_ANY (recall/search). */
 asper_err asper_retrieve(asper_ctx *c, const char *query, asper_section s,

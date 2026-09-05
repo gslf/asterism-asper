@@ -196,6 +196,13 @@ void os_rwlock_wrunlock(os_rwlock *l)
 
 /* ---- filesystem --------------------------------------------------------- */
 
+/* File flush and replacement are available; directory durability is not
+ * claimed for the Windows storage profile. */
+asper_err os_sync_parent(const char *path)
+{
+    return path && *path ? ASPER_OK : ASPER_ERR_INVALID;
+}
+
 asper_err os_file_replace(const char *src, const char *dst)
 {
     wchar_t *ws, *wd;
@@ -216,7 +223,7 @@ asper_err os_file_replace(const char *src, const char *dst)
         DWORD err = GetLastError();
         if (err == ERROR_FILE_NOT_FOUND || err == ERROR_PATH_NOT_FOUND) {
             /* Target missing: plain move is atomic enough here. */
-            if (!MoveFileExW(ws, wd, MOVEFILE_REPLACE_EXISTING))
+            if (!MoveFileExW(ws, wd, MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
                 e = ASPER_ERR_IO;
         } else {
             e = ASPER_ERR_IO;
@@ -241,7 +248,7 @@ asper_err os_rename(const char *src, const char *dst)
         free(wd);
         return ASPER_ERR_NOMEM;
     }
-    if (!MoveFileExW(ws, wd, MOVEFILE_REPLACE_EXISTING)) {
+    if (!MoveFileExW(ws, wd, MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
         DWORD err = GetLastError();
         e = (err == ERROR_FILE_NOT_FOUND || err == ERROR_PATH_NOT_FOUND)
                 ? ASPER_ERR_NOT_FOUND

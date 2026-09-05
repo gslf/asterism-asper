@@ -111,6 +111,10 @@ set(ASPER_SOURCES
   src/config.c
   src/manifest.c
   src/store.c
+  src/store_files.c
+  src/store_transaction.c
+  src/store_compact.c
+  src/record_table.c
   src/source.c
   src/knowledge_codec.c
   src/knowledge_store.c
@@ -121,6 +125,9 @@ set(ASPER_SOURCES
   src/event_frame.c
   src/event_log.c
   src/journal.c
+  src/record_encode.c
+  src/record_decode.c
+  src/record_strings.c
   src/cache.c
   src/index.c
   src/decay.c

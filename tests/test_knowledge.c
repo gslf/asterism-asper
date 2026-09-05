@@ -158,6 +158,12 @@ TEST(corrections_are_independent_of_uuid_order) {
   }
 }
 static asper_time test_now(void *ud) { return *(asper_time *)ud; }
+static asper_err expire_during_embed(void *ud, const char *text, int query,
+    const asmodel_embed_params *params, float *out) {
+  (void)text; (void)query; (void)params; (void)out;
+  *(asper_time *)ud += 2;
+  return ASPER_ERR_MODEL; /* Time advances even when the provider fails. */
+}
 TEST(expired_support_invalidates_descendants) {
   fixture f; ASSERT_TRUE(open_fixture(&f));
   asper_time tick = 1788670000; f.c->clock = (asper_clock){.ud=&tick,.now=test_now};
@@ -170,7 +176,14 @@ TEST(expired_support_invalidates_descendants) {
   asper_knowledge_link link = {.kind=ASPER_REL_SUPPORTS}; strcpy(link.record_id,parent); strcpy(link.content_sha256,f.hash);
   asper_grounding g = {.links=&link,.links_n=1};
   ASSERT_OK(asper_memory_ground(f.c,child,f.hash,0,&g)); ASSERT_EQ_INT(status(f.c,child),ASPER_KNOWLEDGE_CURRENT);
-  tick += 2; ASSERT_EQ_INT(status(f.c,child),ASPER_KNOWLEDGE_STALE); close_fixture(&f);
+  asper_embedder original = f.c->embedder; bool had_embedder = f.c->has_embedder;
+  f.c->embedder = (asper_embedder){.ud=&tick,.dim=1,.embed=expire_during_embed}; f.c->has_embedder = true;
+  asper_record **rows = NULL; size_t n;
+  ASSERT_OK(asper_memory_search(f.c,ASPER_SECTION_CONTEXT,NULL,claim,10,&rows,&n));
+  for (size_t i = 0; i < n; i++) ASSERT_TRUE(strcmp(asper_record_id(rows[i]),child));
+  asper_records_free(rows,n);
+  f.c->embedder = original; f.c->has_embedder = had_embedder;
+  ASSERT_EQ_INT(status(f.c,child),ASPER_KNOWLEDGE_STALE); close_fixture(&f);
 }
 TEST(uncertain_write_poison_and_corrupt_frames) {
   fixture f; ASSERT_TRUE(open_fixture(&f));

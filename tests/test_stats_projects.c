@@ -5,6 +5,7 @@
 
 #include "asper_internal.h"
 #include "fakes.h"
+#include "store_files.h"
 
 #define T0 1785319920LL /* 2026-07-29T10:12:00Z */
 
@@ -98,7 +99,7 @@ TEST(autocreate_off) {
   snprintf(dir, sizeof dir, "%s/projects", root);
   ASSERT_OK(os_mkdir_p(dir));
   snprintf(pre_path, sizeof pre_path, "%s/projects/preexist.xcdn", root);
-  ASSERT_OK(os_write_file(pre_path, "", 0));
+  ASSERT_OK(asper_store_file_write(NULL,pre_path,"",0,true));
   c = open_store(root, cfg_path);
   ASSERT_TRUE(c != NULL);
   ASSERT_ERR(asper_project_select(c, "brand-new"), ASPER_ERR_NOT_FOUND);

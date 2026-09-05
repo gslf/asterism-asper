@@ -3,7 +3,7 @@
  *
  * asper_retrieve embeds the query on the calling thread (the embedder
  * manager serializes requests and enforces the remaining duration), scans
- * the flat index under the read lock and
+ * the flat index under the validity lock and
  * returns deep clones of the hits with .score set. The collect_* helpers
  * return deep clones for injection (in identity order) and for
  * asper_memory_list. All returned arrays are released with
@@ -24,12 +24,14 @@ static void free_clone_array(asper_record **arr, size_t n)
   free(arr);
 }
 
-/* Expiration of a supporting record must invalidate its descendants too. */
-static asper_err refresh_knowledge(asper_ctx *c) {
+/* Refresh after embedding, under the same lock used to select and copy records.
+ * Expiration and uncertain persistence cannot race with materialization. */
+static asper_err lock_knowledge(asper_ctx *c) {
   os_rwlock_wrlock(&c->lock);
   asper_err e = asper_knowledge_guard(c);
   if (e == ASPER_OK) asper_knowledge_refresh(c);
-  os_rwlock_wrunlock(&c->lock); return e;
+  if (e != ASPER_OK) os_rwlock_wrunlock(&c->lock);
+  return e;
 }
 
 static asper_err retrieve_hybrid(asper_ctx *c, const char *query,
@@ -54,7 +56,8 @@ static asper_err retrieve_hybrid(asper_ctx *c, const char *query,
     if (norm>0 && isfinite(norm)) for (int i=0;i<dim;i++) vec[i]/=(float)sqrt(norm);
     else { free(vec);vec=NULL; }
   }
-  os_rwlock_rdlock(&c->lock);
+  e = lock_knowledge(c);
+  if (e != ASPER_OK) { free(vec); return e; }
   size_t cap = c->store.table.n;
   if (k > cap) k = cap;
   docs = calloc(cap ? cap : 1, sizeof *docs);
@@ -88,7 +91,7 @@ static asper_err retrieve_hybrid(asper_ctx *c, const char *query,
   }
   *out=arr; *out_n=hn;
 done:
-  os_rwlock_rdunlock(&c->lock);
+  os_rwlock_wrunlock(&c->lock);
   free(docs); free(refs); free(hits); free(vec);
   return e;
 }
@@ -104,8 +107,6 @@ asper_err asper_retrieve_ex(asper_ctx *c, const char *query, asper_section s,
   *out_n = 0;
   if (!query)
     return asper_seterr(c, ASPER_ERR_INVALID, "retrieve: NULL query");
-  asper_err validity = refresh_knowledge(c);
-  if (validity != ASPER_OK) return validity;
   if (!score_is_cos)
     return retrieve_hybrid(c, query, s, project, k, min_sim, out, out_n);
   /* Cosine-only mode is reserved for deduplication, never hybrid scores. */
@@ -134,14 +135,15 @@ asper_err asper_retrieve_ex(asper_ctx *c, const char *query, asper_section s,
     return asper_seterr(c, ASPER_ERR_NOMEM, "retrieve: out of memory");
   }
 
-  os_rwlock_rdlock(&c->lock);
+  e = lock_knowledge(c);
+  if (e != ASPER_OK) { free(hits); free(qvec); return e; }
   size_t n = asper_index_scan(&c->index, &c->cfg, &c->clock, qvec, s,
                               project, k, min_sim, score_is_cos, hits);
   asper_record **arr = NULL;
   if (n > 0) {
     arr = malloc(n * sizeof *arr);
     if (!arr) {
-      os_rwlock_rdunlock(&c->lock);
+      os_rwlock_wrunlock(&c->lock);
       free(hits);
       free(qvec);
       return asper_seterr(c, ASPER_ERR_NOMEM, "retrieve: out of memory");
@@ -150,7 +152,7 @@ asper_err asper_retrieve_ex(asper_ctx *c, const char *query, asper_section s,
       asper_record *clone = asper_record_clone(hits[i].rec);
       if (!clone) {
         free_clone_array(arr, i);
-        os_rwlock_rdunlock(&c->lock);
+        os_rwlock_wrunlock(&c->lock);
         free(hits);
         free(qvec);
         return asper_seterr(c, ASPER_ERR_NOMEM, "retrieve: out of memory");
@@ -159,7 +161,7 @@ asper_err asper_retrieve_ex(asper_ctx *c, const char *query, asper_section s,
       arr[i] = clone;
     }
   }
-  os_rwlock_rdunlock(&c->lock);
+  os_rwlock_wrunlock(&c->lock);
 
   asper_log(c, ASPER_LOG_DEBUG, "retrieve",
             "query k=%zu hits=%zu best=%.2f floor=%.2f", k, n,
@@ -186,9 +188,8 @@ asper_err asper_collect_identity(asper_ctx *c, asper_record ***out,
   *out = NULL;
   *out_n = 0;
 
-  asper_err validity = refresh_knowledge(c);
+  asper_err validity = lock_knowledge(c);
   if (validity != ASPER_OK) return validity;
-  os_rwlock_rdlock(&c->lock);
   const asper_table *t = &c->store.table;
   size_t cnt = 0;
   for (size_t i = 0; i < t->n; i++) {
@@ -199,13 +200,13 @@ asper_err asper_collect_identity(asper_ctx *c, asper_record ***out,
       cnt++;
   }
   if (cnt == 0) {
-    os_rwlock_rdunlock(&c->lock);
+    os_rwlock_wrunlock(&c->lock);
     return ASPER_OK;
   }
 
   asper_record **arr = malloc(cnt * sizeof *arr);
   if (!arr) {
-    os_rwlock_rdunlock(&c->lock);
+    os_rwlock_wrunlock(&c->lock);
     return asper_seterr(c, ASPER_ERR_NOMEM, "collect_identity: out of memory");
   }
   size_t n = 0;
@@ -218,14 +219,14 @@ asper_err asper_collect_identity(asper_ctx *c, asper_record ***out,
     asper_record *clone = asper_record_clone(r);
     if (!clone) {
       free_clone_array(arr, n);
-      os_rwlock_rdunlock(&c->lock);
+      os_rwlock_wrunlock(&c->lock);
       return asper_seterr(c, ASPER_ERR_NOMEM,
                           "collect_identity: out of memory");
     }
     arr[n++] = clone;
   }
   qsort(arr, n, sizeof *arr, asper_identity_cmp);
-  os_rwlock_rdunlock(&c->lock);
+  os_rwlock_wrunlock(&c->lock);
 
   *out = arr;
   *out_n = n;
@@ -267,9 +268,8 @@ asper_err asper_collect_list(asper_ctx *c, asper_section s,
   *out = NULL;
   *out_n = 0;
 
-  asper_err validity = refresh_knowledge(c);
+  asper_err validity = lock_knowledge(c);
   if (validity != ASPER_OK) return validity;
-  os_rwlock_rdlock(&c->lock);
   const asper_table *t = &c->store.table;
   size_t cnt = 0;
   for (size_t i = 0; i < t->n; i++) {
@@ -277,13 +277,13 @@ asper_err asper_collect_list(asper_ctx *c, asper_section s,
       cnt++;
   }
   if (cnt == 0) {
-    os_rwlock_rdunlock(&c->lock);
+    os_rwlock_wrunlock(&c->lock);
     return ASPER_OK;
   }
 
   asper_record **arr = malloc(cnt * sizeof *arr);
   if (!arr) {
-    os_rwlock_rdunlock(&c->lock);
+    os_rwlock_wrunlock(&c->lock);
     return asper_seterr(c, ASPER_ERR_NOMEM, "collect_list: out of memory");
   }
   size_t n = 0;
@@ -294,13 +294,13 @@ asper_err asper_collect_list(asper_ctx *c, asper_section s,
     asper_record *clone = asper_record_clone(r);
     if (!clone) {
       free_clone_array(arr, n);
-      os_rwlock_rdunlock(&c->lock);
+      os_rwlock_wrunlock(&c->lock);
       return asper_seterr(c, ASPER_ERR_NOMEM, "collect_list: out of memory");
     }
     arr[n++] = clone;
   }
   qsort(arr, n, sizeof *arr, list_cmp);
-  os_rwlock_rdunlock(&c->lock);
+  os_rwlock_wrunlock(&c->lock);
 
   *out = arr;
   *out_n = n;

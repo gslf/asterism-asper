@@ -72,9 +72,12 @@ asper_err asper_event_frame_read(FILE *f, asper_event *e) {
   memset(e, 0, sizeof *e);
   if (!fgets(line, sizeof line, f))
     return ferror(f) ? ASPER_ERR_IO : ASPER_ERR_NOT_FOUND;
-  if (!strchr(line, '\n'))
+  if (!strchr(line, '\n')) {
+    size_t n = strlen(line);
+    bool prefix_ok = !strncmp(line,"AEV2 ",n < 5 ? n : 5);
     return ferror(f) ? ASPER_ERR_IO :
-        (feof(f) ? ASPER_ERR_NOT_FOUND : ASPER_ERR_PARSE);
+        (feof(f) && prefix_ok ? ASPER_ERR_NOT_FOUND : ASPER_ERR_PARSE);
+  }
   if (strncmp(line, "AEV2 ", 5)) return ASPER_ERR_PARSE;
   p = line+5;
   if (!number(&p, ULLONG_MAX, &seq) || !seq) return ASPER_ERR_PARSE;

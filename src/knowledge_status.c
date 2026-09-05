@@ -20,7 +20,7 @@ unsigned long long asper_record_knowledge_revision(const asper_record *r) {
   return r ? r->knowledge_revision : 0;
 }
 asper_err asper_knowledge_guard(asper_ctx *c) {
-  return c->knowledge && c->knowledge->poisoned ? ASPER_ERR_IO : ASPER_OK;
+  return c->store.poisoned || (c->knowledge && c->knowledge->poisoned) ? ASPER_ERR_IO : ASPER_OK;
 }
 static bool same_claim(const asper_record *r, const char *expected) {
   char hash[65];
@@ -37,7 +37,7 @@ static bool covered(const asper_grounding *g, size_t size) {
 }
 static asper_knowledge_status initial(asper_ctx *c, const asper_record *r) {
   asper_knowledge *k = c->knowledge;
-  if (k && k->poisoned) return ASPER_KNOWLEDGE_UNAVAILABLE;
+  if (c->store.poisoned || (k && k->poisoned)) return ASPER_KNOWLEDGE_UNAVAILABLE;
   if (r->deprecated || (r->evidence.expires_at && asper_clock_now(&c->clock) >= r->evidence.expires_at))
     return ASPER_KNOWLEDGE_STALE;
   knowledge_entry *e = knowledge_find(k,r->id);

@@ -1,7 +1,8 @@
 if(NOT DEFINED MCP_EXE OR NOT DEFINED MCP_ROOT_FLAG)
   message(FATAL_ERROR "MCP_EXE and MCP_ROOT_FLAG are required")
 endif()
-set(root "${CMAKE_CURRENT_BINARY_DIR}/mcp-smoke-root")
+string(RANDOM LENGTH 16 ALPHABET 0123456789abcdef run)
+set(root "${CMAKE_CURRENT_BINARY_DIR}/mcp-smoke-${run}")
 set(input "${CMAKE_CURRENT_BINARY_DIR}/mcp-smoke-input.jsonl")
 file(MAKE_DIRECTORY "${root}")
 file(WRITE "${input}"
@@ -13,6 +14,7 @@ file(WRITE "${input}"
 execute_process(COMMAND "${MCP_EXE}" "${MCP_ROOT_FLAG}" "${root}"
   INPUT_FILE "${input}" OUTPUT_VARIABLE output ERROR_VARIABLE errors
   RESULT_VARIABLE rc)
+file(REMOVE_RECURSE "${root}")
 if(NOT rc EQUAL 0)
   message(FATAL_ERROR "MCP exited ${rc}: ${errors}")
 endif()

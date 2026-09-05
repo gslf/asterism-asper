@@ -111,13 +111,30 @@ void os_rwlock_wrunlock(os_rwlock *l) { pthread_rwlock_unlock(&l->l); }
 
 /* ---- filesystem --------------------------------------------------------- */
 
+asper_err os_sync_parent(const char *path)
+{
+    if (!path || !*path) return ASPER_ERR_INVALID;
+    char *dir = strdup(path);
+    if (!dir) return ASPER_ERR_NOMEM;
+    char *slash = strrchr(dir, '/');
+    if (slash) { if (slash == dir) slash[1] = 0; else *slash = 0; }
+    else { free(dir); dir = strdup("."); if (!dir) return ASPER_ERR_NOMEM; }
+    int fd = open(dir, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+    free(dir);
+    if (fd < 0) return ASPER_ERR_IO;
+    int result = fsync(fd);
+    int closed = close(fd);
+    return result || closed ? ASPER_ERR_IO : ASPER_OK;
+}
+
 asper_err os_file_replace(const char *src, const char *dst)
 {
     if (src == NULL || dst == NULL)
         return ASPER_ERR_INVALID;
     if (rename(src, dst) != 0)
         return (errno == ENOENT) ? ASPER_ERR_NOT_FOUND : ASPER_ERR_IO;
-    return ASPER_OK;
+    asper_err e = os_sync_parent(dst);
+    return e == ASPER_OK ? os_sync_parent(src) : e;
 }
 
 asper_err os_rename(const char *src, const char *dst)
@@ -158,7 +175,9 @@ asper_err os_mkdir_p(const char *path)
         if (tmp[i] == '/' || tmp[i] == '\0') {
             char saved = tmp[i];
             tmp[i] = '\0';
-            if (mkdir(tmp, 0777) != 0 && errno != EEXIST && errno != EISDIR) {
+            int made = mkdir(tmp, 0777);
+            if ((made != 0 && errno != EEXIST && errno != EISDIR) ||
+                (made == 0 && os_sync_parent(tmp) != ASPER_OK)) {
                 free(tmp);
                 return ASPER_ERR_IO;
             }
@@ -188,7 +207,7 @@ asper_err os_remove_file(const char *path)
         return ASPER_ERR_INVALID;
     if (unlink(path) != 0)
         return (errno == ENOENT) ? ASPER_ERR_NOT_FOUND : ASPER_ERR_IO;
-    return ASPER_OK;
+    return os_sync_parent(path);
 }
 
 asper_err os_truncate(const char *path, uint64_t size)

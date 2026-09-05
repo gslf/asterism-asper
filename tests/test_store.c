@@ -5,6 +5,8 @@
 
 #include "asper_internal.h"
 #include "fakes.h"
+#include "event_log.h"
+#include "store_files.h"
 
 #define T0 1785319920LL /* 2026-07-29T10:12:00Z */
 
@@ -153,7 +155,11 @@ TEST(journal_only_replay) {
   ASSERT_OK(asper_buf_appendc(&buf, '\n'));
   asper_op_free(&op);
   snprintf(path, sizeof path, "%s/journal.xcdn", root);
-  ASSERT_OK(os_write_file(path, buf.data, buf.len));
+  asper_event event = {0};
+  event.text = buf.data; event.sequence = 1; event.at = T0;
+  event.kind = ASPER_EVENT_DIAGNOSTIC; asper_uuid_v4(event.id);
+  FILE *fp = os_fopen(path,"wb"); ASSERT_TRUE(fp != NULL);
+  ASSERT_OK(asper_event_frame_write(fp,&event)); ASSERT_EQ_INT(fclose(fp),0);
   asper_buf_free(&buf);
   c = open_store(root, NULL);
   ASSERT_TRUE(c != NULL);
@@ -239,7 +245,7 @@ TEST(handwritten_identity_file) {
   fake_clock_set(&g_clk, T0 + 100);
   fake_curator_init(&g_cur);
   snprintf(path, sizeof path, "%s/identity.xcdn", root);
-  ASSERT_OK(os_write_file(path, HAND_IDENTITY, sizeof HAND_IDENTITY - 1));
+  ASSERT_OK(asper_store_file_write(NULL,path,HAND_IDENTITY,sizeof HAND_IDENTITY-1,true));
   c = open_store(root, NULL);
   ASSERT_TRUE(c != NULL);
   ASSERT_OK(asper_memory_list(c, ASPER_SECTION_IDENTITY, NULL, 0, &out, &n));
@@ -333,23 +339,16 @@ static const char MIXED_CONTEXT[] =
     "\n"
     "#note { anything: 1 }\n";
 
-TEST(bad_records_skipped_on_open) {
+TEST(bad_records_reject_snapshot) {
   char root[256], path[512];
   asper_ctx *c;
-  asper_record **out = NULL;
-  size_t n = 0;
   ASSERT_TRUE(asper_test_tmpdir(root));
   fake_clock_set(&g_clk, T0);
   fake_curator_init(&g_cur);
   snprintf(path, sizeof path, "%s/context.xcdn", root);
-  ASSERT_OK(os_write_file(path, MIXED_CONTEXT, sizeof MIXED_CONTEXT - 1));
+  ASSERT_OK(asper_store_file_write(NULL,path,MIXED_CONTEXT,sizeof MIXED_CONTEXT-1,true));
   c = open_store(root, NULL);
-  ASSERT_TRUE(c != NULL); /* unknown/bad values never fail the open */
-  ASSERT_OK(asper_memory_list(c, ASPER_SECTION_CONTEXT, NULL, 1, &out, &n));
-  ASSERT_EQ_INT(n, 1);
-  ASSERT_EQ_STR(asper_record_content(out[0]), "The one good record");
-  asper_records_free(out, n);
-  asper_close(c);
+  ASSERT_TRUE(c == NULL); /* Invalid records cannot silently disappear. */
   fake_curator_dispose(&g_cur);
   asper_test_rmtree(root);
 }
@@ -400,8 +399,6 @@ TEST(manual_op_validation) {
 
 TEST(interrupted_compaction_is_rolled_back_on_open) {
   char root[256], path[512], backup[540], marker[512], id[37];
-  char *data;
-  size_t len;
   asper_ctx *c;
   asper_record **out = NULL;
   size_t n = 0;
@@ -414,29 +411,15 @@ TEST(interrupted_compaction_is_rolled_back_on_open) {
                                 "Compaction rollback sentinel", 0, id));
   asper_close(c); /* establish a fully compacted baseline */
 
-  snprintf(path, sizeof path, "%s/context.xcdn", root);
-  data = asper_test_read_file(path, &len);
-  ASSERT_TRUE(data != NULL);
-  snprintf(backup, sizeof backup, "%s.compact.bak", path);
-  ASSERT_OK(os_write_file(backup, data, len));
-  free(data);
-  snprintf(path, sizeof path, "%s/journal.xcdn", root);
-  data = asper_test_read_file(path, &len);
-  ASSERT_TRUE(data != NULL);
-  snprintf(backup, sizeof backup, "%s.compact.bak", path);
-  ASSERT_OK(os_write_file(backup, data, len));
-  free(data);
-
-  snprintf(path, sizeof path, "%s/context.xcdn", root);
-  ASSERT_OK(os_write_file(path, "corrupt", 7));
-  snprintf(path, sizeof path, "%s/journal.xcdn", root);
-  ASSERT_OK(os_write_file(path, "corrupt", 7));
-  snprintf(marker, sizeof marker, "%s/compact.pending", root);
-  {
-    static const char pending[] = "E context.xcdn\nE journal.xcdn\n";
-    ASSERT_OK(os_write_file(marker, pending, sizeof pending - 1));
-  }
-
+  c = open_store(root,NULL); ASSERT_TRUE(c != NULL);
+  char *rels[] = {"context.xcdn","journal.xcdn"};
+  ASSERT_OK(asper_compact_begin(c,rels,2));
+  snprintf(path,sizeof path,"%s/context.xcdn",root);
+  ASSERT_OK(os_write_file(path,"corrupt",7));
+  snprintf(path,sizeof path,"%s/journal.xcdn",root);
+  ASSERT_OK(os_write_file(path,"corrupt",7));
+  c->store.poisoned = true; asper_close(c);
+  snprintf(marker,sizeof marker,"%s/compact.pending",root);
   c = open_store(root, NULL);
   ASSERT_TRUE(c != NULL);
   ASSERT_TRUE(!os_file_exists(marker));
@@ -494,7 +477,7 @@ TEST_LIST = {
     TEST_ENTRY(compaction_moves_journal_to_sections),
     TEST_ENTRY(handwritten_identity_file),
     TEST_ENTRY(project_files_on_disk),
-    TEST_ENTRY(bad_records_skipped_on_open),
+    TEST_ENTRY(bad_records_reject_snapshot),
     TEST_ENTRY(manual_op_validation),
     TEST_ENTRY(interrupted_compaction_is_rolled_back_on_open),
     TEST_ENTRY(concurrent_mutation_and_cache_save),

@@ -4,7 +4,7 @@ An identitarian memory system for LLMs.
 
 Asper is a local, self-curated long-term memory subsystem for language models, with a specific focus on the smaller ones. It gives a host model  a durable sense of **who it is** (identity), **who it is talking to** (context), and **what it is working on** (projects), by maintaining a retrieval-augmented memory that is written, reorganized and pruned autonomously by a second, micro local *curator* model.
 
-Identity is the always-present first layer. The store is plain [xCDN](https://github.com/gslf/xCDN), so it's easy to inspect and edit. Curator inference and embeddings run in-process via llama.cpp, on a worker thread. They are owned by the shared `asmodel` runtime: standalone Asper creates its own manager, while an embedding host can lend a process-wide manager through `asper_open_at_with_models`.
+Identity is the first layer when its records remain eligible. The store uses inspectable [xCDN](https://github.com/gslf/xCDN) payloads in checked frames; edits go through the API or MCP tools. Curator inference and embeddings run in-process via llama.cpp, on a worker thread. They are owned by the shared `asmodel` runtime: standalone Asper creates its own manager, while an embedding host can lend a process-wide manager through `asper_open_at_with_models`.
 
 Exact scoped events are the source of truth. Asper also owns atomic working
 checkpoints and content-addressed objects for large payloads. Semantic records
@@ -127,10 +127,9 @@ asper_context_pack_free(&context);
 asper_close(ctx);
 ```
 
-`asper_open` preserves cwd-relative resolution and the original two-pointer
-`asper_open_params` ABI. A host that resolves models relative to its own root
-can use the additive `asper_open_at(&p, engine_root, &ctx)` API without changing
-the public struct.
+`asper_open` resolves paths relative to the process directory. Hosts can use
+`asper_open_at(&p, engine_root, &ctx)` to provide an explicit base directory.
+Check `asper_abi_version()` against the header used to compile the host.
 
 ## MCP server
 
@@ -157,7 +156,7 @@ context/recall APIs support concurrent hosts without switching shared state.
 
 ### Shared embedding pipeline
 
-Asper ABI 4 borrows preprocessing and pipeline identity from the host's asmodel
+The shared binding borrows preprocessing and pipeline identity from the host's asmodel
 manager. `asper_model_binding` identifies the model and dimension; it no longer
 accepts a separately supplied cache hash. Standalone configuration retains
 `embedding.query_prefix` / `passage_prefix` and adds `revision`, `tokenizer` and
@@ -176,3 +175,10 @@ Stale or revoked knowledge is excluded from retrieval; history stays inspectable
 Host observations must be renewed after restart. The old standalone `supersedes`
 field was removed in favor of version-bound grounding links. This is a validity
 contract, not a claim that referenced text is necessarily true.
+
+### Checked persistence (store format 2)
+
+[Storage and recovery](docs/storage.md) describes operation/snapshot framing,
+backup validation, sync policy, quotas and fault tests. Complete corruption and
+uncertain durability fail closed. Old store versions require deliberate conversion;
+there is no automatic migration or compatibility path.

@@ -58,9 +58,9 @@ three sections:
 - **Context:** facts about the user, environment and continuing relationship.
 - **Project:** facts local to a named body of work.
 
-Records support relevance, tags, locking, deprecation and supersession. Every
-curator-created record carries the UUIDs of the exact events that substantiate
-it. Semantic memory is useful because it is compact and searchable; it is not
+Records support relevance, tags, locking, deprecation and supersession. Curator-created records carry candidate source UUIDs from their batch.
+Granular support is attached separately by the host, as described in
+[grounding and correction history](knowledge.md). Semantic memory is useful because it is compact and searchable; it is not
 authoritative.
 
 ### 3.3 Working checkpoints
@@ -94,13 +94,15 @@ after restart. No inference failure can erase the original information.
 
 ## 5. Storage architecture
 
-The store is local, inspectable xCDN plus exact binary objects. Each scope owns a
+The store is local, with inspectable xCDN payloads in checked frames plus exact
+binary objects. [Store format 2](storage.md) defines its recovery contract. Each scope owns a
 length-framed append-only event log and its pin state. Length framing makes torn
 tail writes detectable and repairable without discarding earlier events.
 
-Semantic section files, indexes, embedding data and curator acknowledgements are
-derived operational state. They may be compacted or rebuilt from durable source
-events. Checkpoints are replaced atomically. Content-addressed objects avoid
+Semantic snapshots, indexes, embedding data and curator acknowledgements are
+operational state. Indexes can be rebuilt; record snapshots retain manual records
+and checked operation projections. A corrupt snapshot fails open instead of silently
+reconstructing a potentially different set of claims. Checkpoints are replaced atomically. Content-addressed objects avoid
 writing duplicate large payloads.
 
 This layout favors debuggability over an opaque database: operators can inspect
@@ -137,8 +139,8 @@ The curator is a small, separate model whose narrow job is to reorganize memory.
 It does not answer the user's main request. Working in batches keeps curation off
 the interactive path and amortizes prompt overhead across multiple events.
 
-The curator may insert, update, supersede or deprecate semantic records, subject
-to validation. Locked records remain under operator control. Failed or malformed
+The curator may propose inserts, updates and deprecations subject to validation.
+Version-bound grounding and correction links belong to the host. Locked records remain under operator control. Failed or malformed
 operations are rejected without acknowledging their source events.
 
 Retrieval combines semantic similarity with section, project, recency, stored
@@ -162,7 +164,8 @@ Asper keeps the synchronous path intentionally small:
 - compaction rewrites derived state atomically instead of blocking every read.
 
 When embedded in asngn, curator and embedding models borrow its process-wide
-asmodel manager. Weights, contexts and residency budgets are not duplicated.
+asmodel manager. Backend residency is shared; the current wrapper serializes requests to a backend.
+Shared residency does not provide native multi-sequence decoding.
 Standalone Asper can own a manager and retain the same behavior.
 
 ## 9. Token economy without information loss
@@ -175,8 +178,8 @@ Asper reduces model input, not stored knowledge.
   produced it.
 - Pinned and recent exact events preserve high-value verbatim evidence.
 - Separate zone budgets stop one kind of memory from consuming all context.
-- Exact token counting budgets against the model that will actually consume the
-  prompt.
+- Token counts carry exact/estimated/unknown status; admission uses a conservative
+  estimate when a verified tokenizer/template is unavailable.
 - Large payloads remain as objects and only useful ranges enter the prompt.
 - Source provenance permits compact records to be verified or rebuilt.
 

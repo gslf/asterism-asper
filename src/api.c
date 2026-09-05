@@ -292,6 +292,7 @@ static asper_err apply_validate(asper_ctx *c, const asper_op *op,
                c->cfg.identity_max_records);
       return ASPER_ERR_INVALID;
     }
+    if (c->store.table.n >= ASPER_RECORD_LIMIT) return ASPER_ERR_LIMIT;
     if (asper_table_get(&c->store.table, r->id)) {
       snprintf(why, why_sz, "duplicate id %s", r->id);
       return ASPER_ERR_INVALID;
@@ -378,6 +379,8 @@ static asper_err apply_validate(asper_ctx *c, const asper_op *op,
     return ASPER_OK;
 
   case ASPER_OP_PROJECT_CREATE:
+    if (op->project && !asper_store_project_known(c,op->project) &&
+        c->store.projects_n >= ASPER_PROJECT_LIMIT) return ASPER_ERR_LIMIT;
     if (!op->project || !asper_slug_valid(op->project)) {
       snprintf(why, why_sz, "invalid project slug");
       return ASPER_ERR_INVALID;
@@ -451,7 +454,8 @@ asper_err asper_apply_op(asper_ctx *c, asper_op *op, bool from_curator) {
     if (op->kind == ASPER_OP_INSERT && ins) ins->emb_row = -1;
     e = asper_store_apply(c, op);
     if (e != ASPER_OK) {
-      /* Journal-present but skipped in memory: same tolerance as replay. */
+      /* Preserve the WAL if the live projection could not apply it. */
+      asper_store_poison(c);
       c->stats.ops_rejected++;
       os_rwlock_wrunlock(&c->lock);
       free(prepared_vec);
@@ -825,7 +829,7 @@ void asper_close(asper_ctx *c) {
   if (!c) return;
   asper_worker_stop(c);
   /* Final durability pass. Close never runs curation: turns still queued are
-   * discarded (the journal only ever holds applied ops). */
+   * discarded. An uncertain journal is preserved for recovery on reopen. */
   (void)asper_access_flush(c);
   (void)asper_journal_sync(c);
   (void)asper_store_compact(c);

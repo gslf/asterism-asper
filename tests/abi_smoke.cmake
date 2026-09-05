@@ -1,0 +1,7 @@
+string(RANDOM LENGTH 16 ALPHABET 0123456789abcdef run)
+set(root "${CMAKE_CURRENT_BINARY_DIR}/abi-${run}")
+execute_process(COMMAND "${ABI_EXE}" "${root}" RESULT_VARIABLE rc)
+file(REMOVE_RECURSE "${root}")
+if(NOT rc EQUAL 0)
+  message(FATAL_ERROR "Public ABI probe failed: ${rc}")
+endif()
