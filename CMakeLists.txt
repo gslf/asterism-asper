@@ -112,6 +112,8 @@ set(ASPER_SOURCES
   src/manifest.c
   src/store.c
   src/source.c
+  src/event_frame.c
+  src/event_log.c
   src/journal.c
   src/cache.c
   src/index.c

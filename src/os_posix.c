@@ -28,9 +28,20 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <sys/file.h>
 #include <sys/types.h>
 #include <time.h>
 #include <unistd.h>
+
+FILE *os_store_lock(const char *path) {
+    int fd = open(path, O_CREAT | O_RDWR | O_CLOEXEC | O_NOFOLLOW, 0600);
+    FILE *f;
+    if (fd < 0) return NULL;
+    if (flock(fd, LOCK_EX | LOCK_NB) != 0) { close(fd); return NULL; }
+    f = fdopen(fd, "r+b");
+    if (!f) close(fd);
+    return f;
+}
 
 /* ---- threads ------------------------------------------------------------ */
 

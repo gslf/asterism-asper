@@ -153,7 +153,7 @@ TEST(torn_tail_is_repaired_without_losing_complete_events) {
   snprintf(path, sizeof path, "%s/scopes/repair/events.log", root);
   f = fopen(path, "ab");
   ASSERT_TRUE(f != NULL);
-  ASSERT_TRUE(fwrite("AEV1 2 torn", 1, 11, f) == 11);
+  ASSERT_TRUE(fwrite("AEV2 2 torn", 1, 11, f) == 11);
   fclose(f);
   ASSERT_OK(asper_event_list(c, "repair", &events, &n));
   ASSERT_EQ_INT(n, 1);
@@ -213,8 +213,84 @@ TEST(uncurated_events_replay_once_after_restart) {
   asper_test_rmtree(root);
 }
 
+TEST(event_index_rebuild_and_late_page) {
+  char root[256], path[512], text[64];
+  asper_event_input in = {0};
+  asper_event *events = NULL;
+  size_t n = 0;
+  unsigned long long cursor = 0;
+  ASSERT_TRUE(asper_test_tmpdir(root));
+  fake_clock_set(&g_clk, 1785319920LL);
+  fake_curator_init(&g_cur);
+  asper_ctx *c = open_store(root);
+  ASSERT_TRUE(c != NULL);
+  in.scope = "pages"; in.kind = ASPER_EVENT_DIAGNOSTIC;
+  for (int i = 1; i <= 40; i++) {
+    snprintf(text, sizeof text, "event %d", i); in.text = text;
+    ASSERT_OK(asper_event_append(c, &in, NULL));
+  }
+  snprintf(path, sizeof path, "%s/scopes/pages/events.log.idx", root);
+  ASSERT_OK(os_remove_file(path));
+  ASSERT_OK(asper_event_search(c, "pages", "event", 35, 2, &events, &n, &cursor));
+  ASSERT_EQ_INT(n, 2); ASSERT_EQ_INT(cursor, 37);
+  ASSERT_EQ_STR(events[0].text, "event 36");
+  asper_events_free(events, n);
+  /* Damage a non-final index row; it is repaired without losing source data. */
+  FILE *f = fopen(path, "r+b");
+  ASSERT_TRUE(f != NULL);
+  ASSERT_EQ_INT(fseek(f, 8 + 37*48, SEEK_SET), 0);
+  ASSERT_TRUE(fputc(0xff, f) != EOF); fclose(f);
+  ASSERT_OK(asper_event_search(c, "pages", "event", cursor, 2, &events, &n, &cursor));
+  ASSERT_EQ_INT(n, 2); ASSERT_EQ_INT(cursor, 39);
+  ASSERT_EQ_STR(events[0].text, "event 38");
+  asper_events_free(events, n);
+  in.text = "event 41";
+  ASSERT_OK(asper_event_append(c, &in, NULL));
+  ASSERT_OK(asper_event_search(c, "pages", "41", cursor, 2, &events, &n, &cursor));
+  ASSERT_EQ_INT(n, 1); ASSERT_EQ_INT(cursor, 41);
+  asper_events_free(events, n);
+  asper_close(c); fake_curator_dispose(&g_cur); asper_test_rmtree(root);
+}
+
+TEST(event_corruption_is_not_repaired_as_a_torn_tail) {
+  char root[256], path[512];
+  asper_event_input in = {0};
+  asper_event *events = NULL;
+  char *data = NULL;
+  size_t n = 0, bytes = 0;
+  uint64_t preserved;
+  ASSERT_TRUE(asper_test_tmpdir(root));
+  fake_clock_set(&g_clk, 1785319920LL);
+  fake_curator_init(&g_cur);
+  asper_ctx *c = open_store(root);
+  ASSERT_TRUE(c != NULL);
+  in.kind = ASPER_EVENT_DIAGNOSTIC; in.text = "complete";
+  for (int variant = 0; variant < 2; variant++) {
+    in.scope = variant ? "metadata" : "payload";
+    ASSERT_OK(asper_event_append(c, &in, NULL));
+    snprintf(path, sizeof path, "%s/scopes/%s/events.log", root, in.scope);
+    ASSERT_OK(os_read_file(path, &data, &bytes));
+    if (variant) {
+      char *len = strstr(data, " 0 8 ");
+      ASSERT_TRUE(len != NULL);
+      len[3] = '9'; /* A corrupted length must not cause truncation. */
+    } else {
+      char *body = strchr(data, '\n');
+      ASSERT_TRUE(body != NULL); body[1] = 'C';
+    }
+    ASSERT_OK(os_write_file(path, data, bytes)); free(data); data = NULL;
+    ASSERT_ERR(asper_event_list(c, in.scope, &events, &n), ASPER_ERR_PARSE);
+    ASSERT_TRUE(events == NULL); ASSERT_EQ_INT(n, 0);
+    ASSERT_OK(os_file_size(path, &preserved)); ASSERT_TRUE(preserved == bytes);
+    ASSERT_ERR(asper_event_append(c, &in, NULL), ASPER_ERR_PARSE);
+  }
+  asper_close(c); fake_curator_dispose(&g_cur); asper_test_rmtree(root);
+}
+
 TEST_LIST = {
     TEST_ENTRY(event_roundtrip_and_pinning),
+    TEST_ENTRY(event_index_rebuild_and_late_page),
+    TEST_ENTRY(event_corruption_is_not_repaired_as_a_torn_tail),
     TEST_ENTRY(object_range_and_dedup),
     TEST_ENTRY(checkpoint_and_context_survive_reopen),
     TEST_ENTRY(torn_tail_is_repaired_without_losing_complete_events),

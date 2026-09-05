@@ -685,6 +685,7 @@ void asper_log(asper_ctx *c, int level, const char *subsys,
 /* ═══════════════════════ the context ═══════════════════════ */
 
 struct asper_ctx {
+  FILE *store_lock;
   asper_config cfg;
   asper_store store;
   asper_index index;

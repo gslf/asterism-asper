@@ -254,3 +254,26 @@ source append, context materialization, recall, project selection and stats.
 Configuration examples, build steps and the complete MCP tool list belong in
 the README and `examples/config.xcdn`. This document defines the architecture
 and its invariants, not a second configuration reference.
+
+
+## Exact source storage, revision 2
+
+Each scope uses AEV2 frames with separately checked metadata and payload hashes.
+Metadata integrity is checked before a length is used for torn-tail recovery.
+A complete corrupt frame fails with `ASPER_ERR_PARSE`; recovery only discards an
+incomplete final frame. The limits are 16 MiB per event and 512 MiB per scope log.
+Existing AEV1 stores are not silently migrated or interpreted as AEV2.
+
+`events.log.idx` is a derived offset index. It is rebuilt from validated source
+frames when missing, truncated or damaged. Appends no longer allocate the scope
+history, and cursor search seeks to the requested sequence then scans matching
+text with one temporary frame. This is an offset index, not an inverted text
+index: selective text queries can still scan the remaining scope. Each returned
+frame is verified; a page is not an integrity audit of unrelated earlier frames.
+The full-list API necessarily allocates its full result. Pin overlays are read
+as a bounded stream, with an 8 MiB limit.
+
+A store holds a single-writer OS lock throughout its lifetime. Opening it again
+returns `ASPER_ERR_BUSY`; a host should lend one context to its session lanes.
+An I/O error after an append has started can have an uncertain durable outcome;
+callers must reconcile the event log rather than blindly retry the operation.

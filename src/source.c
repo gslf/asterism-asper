@@ -15,16 +15,13 @@
 #include <string.h>
 
 #include "asper_internal.h"
+#include "event_log.h"
 
-#define EVENT_MAGIC "AEV1"
 #define OBJECT_PREFIX "sha256:"
 
 typedef struct {
   asper_event *v;
   size_t n;
-  size_t cap;
-  size_t good_bytes;
-  unsigned long long next_sequence;
 } event_scan;
 
 static int scope_valid(const char *scope) {
@@ -146,168 +143,47 @@ static char *object_path(asper_ctx *c, const char *ref) {
   return path;
 }
 
-static void event_scan_free(event_scan *scan) {
-  if (!scan) return;
-  asper_events_free(scan->v, scan->n);
-  memset(scan, 0, sizeof *scan);
-}
-
 void asper_events_free(asper_event *events, size_t n) {
   if (!events) return;
   for (size_t i = 0; i < n; i++) free(events[i].text);
   free(events);
 }
 
-static asper_err scan_push(event_scan *scan, const asper_event *event) {
-  if (scan->n == scan->cap) {
-    size_t cap = scan->cap ? scan->cap * 2 : 32;
-    asper_event *nv = (asper_event *)realloc(scan->v, cap * sizeof *nv);
-    if (!nv) return ASPER_ERR_NOMEM;
-    scan->v = nv;
-    scan->cap = cap;
-  }
-  scan->v[scan->n++] = *event;
-  return ASPER_OK;
-}
-
-static const char *find_nl(const char *p, const char *end) {
-  while (p < end && *p != '\n') p++;
-  return p < end ? p : NULL;
-}
-
-/* Parse every complete frame.  A malformed mid-file frame is corruption;
- * an incomplete final frame is a recoverable torn tail. */
-static asper_err event_scan_file(asper_ctx *c, const char *path,
-                                 event_scan *scan) {
-  char *data = NULL;
-  size_t len = 0, off = 0;
-  asper_err e;
-  memset(scan, 0, sizeof *scan);
-  scan->next_sequence = 1;
-  e = os_read_file(path, &data, &len);
-  if (e == ASPER_ERR_NOT_FOUND) return ASPER_OK;
-  if (e != ASPER_OK) return e;
-  while (off < len) {
-    const char *line = data + off;
-    const char *end = data + len;
-    const char *nl = find_nl(line, end);
-    char magic[5] = {0};
-    unsigned long long seq = 0;
-    long long at = 0;
-    int kind = -1, pinned = 0, consumed = 0;
-    char id[37] = {0};
-    size_t obj_len = 0, text_len = 0, header_len, frame_len;
-    asper_event ev;
-    if (!nl) break;
-    header_len = (size_t)(nl - line) + 1;
-    if (sscanf(line, "%4s %llu %lld %d %d %36s %zu %zu%n", magic, &seq,
-               &at, &kind, &pinned, id, &obj_len, &text_len, &consumed) != 8 ||
-        strcmp(magic, EVENT_MAGIC) != 0 || consumed <= 0 ||
-        line + consumed != nl || seq == 0 || !asper_uuid_valid(id) ||
-        kind < ASPER_EVENT_USER || kind > ASPER_EVENT_ARTIFACT ||
-        (pinned != 0 && pinned != 1) || obj_len > 71 ||
-        obj_len > SIZE_MAX - text_len - header_len - 1) {
-      free(data);
-      event_scan_free(scan);
-      return asper_seterr(c, ASPER_ERR_PARSE,
-                          "source: malformed event frame at byte %zu", off);
-    }
-    frame_len = header_len + obj_len + text_len + 1;
-    if (frame_len > len - off) break;
-    if (data[off + frame_len - 1] != '\n') {
-      free(data);
-      event_scan_free(scan);
-      return asper_seterr(c, ASPER_ERR_PARSE,
-                          "source: malformed event terminator at byte %zu",
-                          off);
-    }
-    memset(&ev, 0, sizeof ev);
-    memcpy(ev.id, id, sizeof ev.id);
-    ev.sequence = seq;
-    ev.at = at;
-    ev.kind = (asper_event_kind)kind;
-    ev.pinned = pinned;
-    if (obj_len) {
-      memcpy(ev.object_ref, data + off + header_len, obj_len);
-      ev.object_ref[obj_len] = '\0';
-      if (!object_ref_valid(ev.object_ref)) {
-        free(data);
-        event_scan_free(scan);
-        return asper_seterr(c, ASPER_ERR_PARSE,
-                            "source: invalid object ref at byte %zu", off);
-      }
-    }
-    ev.text = (char *)malloc(text_len + 1);
-    if (!ev.text) {
-      free(data);
-      event_scan_free(scan);
-      return ASPER_ERR_NOMEM;
-    }
-    memcpy(ev.text, data + off + header_len + obj_len, text_len);
-    ev.text[text_len] = '\0';
-    if (!asper_utf8_count(ev.text, NULL)) {
-      free(ev.text);
-      free(data);
-      event_scan_free(scan);
-      return asper_seterr(c, ASPER_ERR_PARSE,
-                          "source: invalid UTF-8 event at byte %zu", off);
-    }
-    e = scan_push(scan, &ev);
-    if (e != ASPER_OK) {
-      free(ev.text);
-      free(data);
-      event_scan_free(scan);
-      return e;
-    }
-    if (seq >= scan->next_sequence) scan->next_sequence = seq + 1;
-    off += frame_len;
-    scan->good_bytes = off;
-  }
-  free(data);
-  if (off < len) {
-    e = os_truncate(path, (uint64_t)scan->good_bytes);
-    if (e != ASPER_OK) {
-      event_scan_free(scan);
-      return asper_seterr(c, e, "source: cannot repair torn event tail");
-    }
-    asper_log(c, ASPER_LOG_WARN, "source",
-              "repaired torn event tail: %zu byte(s) removed",
-              len - scan->good_bytes);
-  }
-  return ASPER_OK;
-}
-
-static void apply_pin_log(asper_ctx *c, const char *scope, event_scan *scan) {
+static asper_err apply_pin_log(asper_ctx *c, const char *scope, event_scan *scan) {
   char *path = scope_path(c, scope, "pins.log");
-  char *data = NULL;
-  size_t len = 0;
-  if (!path) return;
-  if (os_read_file(path, &data, &len) == ASPER_OK) {
-    char *p = data;
-    char *end = data + len;
-    while (p < end) {
-      char id[37] = {0};
-      int value = 0, used = 0;
-      if (sscanf(p, "%36s %d%n", id, &value, &used) != 2 || used <= 0)
-        break;
-      for (size_t i = 0; i < scan->n; i++)
-        if (strcmp(scan->v[i].id, id) == 0) scan->v[i].pinned = value != 0;
-      while (p < end && *p != '\n') p++;
-      if (p < end) p++;
-    }
+  char line[48];
+  uint64_t bytes;
+  asper_err err;
+  FILE *f;
+  if (!path) return ASPER_ERR_NOMEM;
+  err = os_file_size(path, &bytes);
+  if (err == ASPER_ERR_NOT_FOUND) { free(path); return ASPER_OK; }
+  if (err != ASPER_OK || bytes > 8u*1024u*1024u) {
+    free(path); return err == ASPER_OK ? ASPER_ERR_INVALID : err;
   }
-  free(data);
-  free(path);
+  f = os_fopen(path, "rb"); free(path);
+  if (!f) return ASPER_ERR_IO;
+  while (fgets(line, sizeof line, f)) {
+    if (strlen(line) != 39 || line[36] != ' ' || line[38] != '\n' ||
+        (line[37] != '0' && line[37] != '1')) {
+      err = ASPER_ERR_PARSE; break;
+    }
+    line[36] = 0;
+    if (!asper_uuid_valid(line)) { err = ASPER_ERR_PARSE; break; }
+    for (size_t i = 0; i < scan->n; i++)
+      if (!strcmp(scan->v[i].id, line)) scan->v[i].pinned = line[37] == '1';
+  }
+  if (ferror(f)) err = ASPER_ERR_IO;
+  fclose(f);
+  return err;
 }
 
 asper_err asper_event_append(asper_ctx *c, const asper_event_input *event,
                              char out_id[37]) {
   char id[37];
   char *path = NULL;
-  FILE *f = NULL;
-  event_scan scan;
+  asper_event stored = {0};
   asper_err e;
-  size_t text_len, obj_len;
   long long at = 0;
   if (!c || !event || !scope_valid(event->scope) || !event->text)
     return c ? asper_seterr(c, ASPER_ERR_INVALID,
@@ -324,32 +200,18 @@ asper_err asper_event_append(asper_ctx *c, const asper_event_input *event,
   os_mutex_lock(&c->source_mu);
   e = register_scope_locked(c, event->scope);
   if (e != ASPER_OK) goto out;
-  e = event_scan_file(c, path, &scan);
-  if (e != ASPER_OK) goto out;
   asper_uuid_v4(id);
   at = (long long)asper_clock_now(&c->clock);
-  text_len = strlen(event->text);
-  obj_len = event->object_ref ? strlen(event->object_ref) : 0;
-  f = os_fopen(path, "ab");
-  if (!f) {
-    e = ASPER_ERR_IO;
-    goto out_scan;
-  }
-  if (fprintf(f, EVENT_MAGIC " %llu %lld %d %d %s %zu %zu\n",
-              scan.next_sequence, at, (int)event->kind,
-              event->pinned ? 1 : 0, id, obj_len, text_len) < 0 ||
-      (obj_len && fwrite(event->object_ref, 1, obj_len, f) != obj_len) ||
-      (text_len && fwrite(event->text, 1, text_len, f) != text_len) ||
-      fputc('\n', f) == EOF || fflush(f) != 0 || os_fsync(f) != ASPER_OK) {
-    e = ASPER_ERR_IO;
-    goto out_scan;
-  }
-  if (out_id) memcpy(out_id, id, 37);
-  e = ASPER_OK;
-out_scan:
-  event_scan_free(&scan);
+  memcpy(stored.id, id, 37);
+  stored.at = at;
+  stored.kind = event->kind;
+  stored.pinned = event->pinned != 0;
+  stored.text = (char *)event->text;
+  if (event->object_ref) memcpy(stored.object_ref, event->object_ref,
+                                strlen(event->object_ref)+1);
+  e = asper_event_log_append(path, &stored);
+  if (e == ASPER_OK && out_id) memcpy(out_id, id, 37);
 out:
-  if (f && fclose(f) != 0 && e == ASPER_OK) e = ASPER_ERR_IO;
   os_mutex_unlock(&c->source_mu);
   free(path);
   if (e != ASPER_OK)
@@ -379,8 +241,12 @@ asper_err asper_event_list(asper_ctx *c, const char *scope,
   path = scope_path(c, scope, "events.log");
   if (!path) return ASPER_ERR_IO;
   os_mutex_lock(&c->source_mu);
-  e = event_scan_file(c, path, &scan);
-  if (e == ASPER_OK) apply_pin_log(c, scope, &scan);
+  unsigned long long next;
+  e = asper_event_log_page(path, "", 0, SIZE_MAX, &scan.v, &scan.n, &next);
+  if (e == ASPER_OK) {
+    e = apply_pin_log(c, scope, &scan);
+    if (e != ASPER_OK) asper_events_free(scan.v, scan.n);
+  }
   os_mutex_unlock(&c->source_mu);
   free(path);
   if (e != ASPER_OK) return e;
@@ -393,25 +259,24 @@ asper_err asper_event_search(asper_ctx *c, const char *scope, const char *query,
                              unsigned long long after, size_t limit,
                              asper_event **out, size_t *out_n,
                              unsigned long long *next) {
-  asper_event *all = NULL, *page;
-  size_t n = 0, used = 0;
+  event_scan scan;
   asper_err e;
-  if (!out || !out_n || !next || !query || limit == 0 || limit > 1000)
-    return ASPER_ERR_INVALID;
+  char *path;
+  if (!c || !scope_valid(scope) || !out || !out_n || !next || !query ||
+      limit == 0 || limit > 1000) return ASPER_ERR_INVALID;
   *out = NULL; *out_n = 0; *next = after;
-  e = asper_event_list(c, scope, &all, &n);
-  if (e != ASPER_OK) return e;
-  page = calloc(limit, sizeof *page);
-  if (!page) { asper_events_free(all, n); return ASPER_ERR_NOMEM; }
-  for (size_t i = 0; i < n && used < limit; i++) {
-    if (all[i].sequence <= after) continue;
-    *next = all[i].sequence;
-    if (*query && !strstr(all[i].text, query)) continue;
-    page[used++] = all[i];
-    all[i].text = NULL; /* Transfer ownership of selected exact events. */
+  path = scope_path(c, scope, "events.log");
+  if (!path) return ASPER_ERR_IO;
+  os_mutex_lock(&c->source_mu);
+  e = asper_event_log_page(path, query, after, limit, &scan.v, &scan.n, next);
+  if (e == ASPER_OK) {
+    e = apply_pin_log(c, scope, &scan);
+    if (e != ASPER_OK) asper_events_free(scan.v, scan.n);
   }
-  asper_events_free(all, n);
-  *out = page; *out_n = used;
+  os_mutex_unlock(&c->source_mu);
+  free(path);
+  if (e != ASPER_OK) { *next = after; return e; }
+  *out = scan.v; *out_n = scan.n;
   return ASPER_OK;
 }
 
@@ -425,11 +290,14 @@ asper_err asper_event_set_pinned(asper_ctx *c, const char *scope,
   int found = 0;
   if (!c || !scope_valid(scope) || !asper_uuid_valid(event_id))
     return ASPER_ERR_INVALID;
-  e = asper_event_list(c, scope, &events, &n);
-  if (e != ASPER_OK) return e;
-  for (size_t i = 0; i < n; i++)
-    if (strcmp(events[i].id, event_id) == 0) found = 1;
-  asper_events_free(events, n);
+  unsigned long long cursor = 0;
+  do {
+    e = asper_event_search(c, scope, "", cursor, 256, &events, &n, &cursor);
+    if (e != ASPER_OK) return e;
+    for (size_t i = 0; i < n; i++)
+      if (strcmp(events[i].id, event_id) == 0) found = 1;
+    asper_events_free(events, n);
+  } while (!found && n == 256);
   if (!found) return ASPER_ERR_NOT_FOUND;
   path = scope_path(c, scope, "pins.log");
   if (!path) return ASPER_ERR_IO;

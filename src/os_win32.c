@@ -470,6 +470,23 @@ asper_err os_list_dir(const char *path, char ***out_names, size_t *out_n)
     return ASPER_OK;
 }
 
+FILE *os_store_lock(const char *path) {
+    wchar_t *w = os_u8_to_wide(path);
+    HANDLE h;
+    int fd;
+    FILE *f;
+    if (!w) return NULL;
+    h = CreateFileW(w, GENERIC_READ | GENERIC_WRITE, 0, NULL, OPEN_ALWAYS,
+                    FILE_ATTRIBUTE_NORMAL, NULL);
+    free(w);
+    if (h == INVALID_HANDLE_VALUE) return NULL;
+    fd = _open_osfhandle((intptr_t)h, _O_RDWR | _O_BINARY);
+    if (fd < 0) { CloseHandle(h); return NULL; }
+    f = _fdopen(fd, "r+b");
+    if (!f) _close(fd);
+    return f;
+}
+
 FILE *os_fopen(const char *path, const char *mode)
 {
     wchar_t *wp;

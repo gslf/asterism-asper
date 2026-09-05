@@ -538,6 +538,7 @@ static void ctx_destroy(asper_ctx *c, bool store_opened) {
   free(c->pending);
   free(c->active_project);
   asper_log_close(c);
+  if (c->store_lock) fclose(c->store_lock);
   asper_config_free(&c->cfg);
   os_cond_destroy(&c->done_cv);
   os_cond_destroy(&c->ev_cv);
@@ -622,6 +623,15 @@ static asper_err asper_open_impl(const asper_open_params *p,
   if (!c->store.root) {
     e = ASPER_ERR_NOMEM;
     goto fail;
+  }
+  e = os_mkdir_p(c->store.root);
+  if (e != ASPER_OK) goto fail;
+  {
+    char *lock_path = os_path_join(c->store.root, ".writer.lock");
+    if (!lock_path) { e = ASPER_ERR_NOMEM; goto fail; }
+    c->store_lock = os_store_lock(lock_path);
+    free(lock_path);
+    if (!c->store_lock) { e = ASPER_ERR_BUSY; goto fail; }
   }
   e = asper_store_open(c);
   if (e != ASPER_OK) goto fail;

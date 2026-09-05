@@ -50,6 +50,7 @@
 #define os_file_size          asper_x_file_size
 #define os_rename             asper_x_rename
 #define os_list_dir           asper_x_list_dir
+#define os_store_lock         asper_x_store_lock
 #define os_fopen              asper_x_fopen
 #define os_now_unix           asper_x_now_unix
 #define os_monotonic_ms       asper_x_monotonic_ms
@@ -145,6 +146,8 @@ asper_err os_rename(const char *src, const char *dst);
  * names, unsorted; caller frees each + array. Missing dir => 0 entries. */
 asper_err os_list_dir(const char *path, char ***out_names, size_t *out_n);
 /* Open a FILE* with UTF-8 path (fopen wrapper; _wfopen on Windows). */
+/* Close to release; keep the lock file linked while the store exists. */
+FILE *os_store_lock(const char *path);
 FILE     *os_fopen(const char *path, const char *mode);
 
 /* ---- misc --------------------------------------------------------------- */

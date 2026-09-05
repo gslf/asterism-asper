@@ -99,7 +99,21 @@ TEST(explicit_project_materialization_isolated) {
   asper_close(c);
   asper_test_rmtree(root);
 }
-TEST_LIST = {TEST_ENTRY(exact_path_symbol_beats_misleading_vector),
+TEST(store_has_one_writer) {
+  char root[256];
+  asper_ctx *a = NULL, *b = NULL;
+  asper_open_params p = {0};
+  ASSERT_TRUE(asper_test_tmpdir(root));
+  p.memory_root = root;
+  ASSERT_OK(asper_open(&p, &a));
+  ASSERT_ERR(asper_open(&p, &b), ASPER_ERR_BUSY);
+  ASSERT_TRUE(b == NULL);
+  asper_close(a);
+  ASSERT_OK(asper_open(&p, &b));
+  asper_close(b);
+  asper_test_rmtree(root);
+}
+TEST_LIST = {TEST_ENTRY(store_has_one_writer),TEST_ENTRY(exact_path_symbol_beats_misleading_vector),
              TEST_ENTRY(evidence_roundtrip_expiry_and_manual_edit),
              TEST_ENTRY(explicit_project_materialization_isolated)};
 RUN_ALL_TESTS()
