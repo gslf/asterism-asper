@@ -26,11 +26,18 @@ jobs:
         with:
           path: asterism-asper
           submodules: recursive
+      - name: Read asmodel pin
+        id: pins
+        shell: pwsh
+        run: |
+          $spec = Get-Content asterism-asper/dependencies.json -Raw | ConvertFrom-Json
+          if ($spec.schema -ne 1 -or $spec.asmodel.revision -notmatch '^[0-9a-f]{40}$') { throw "Invalid dependency pin" }
+          "asmodel=$($spec.asmodel.revision)" >> $env:GITHUB_OUTPUT
       - name: Checkout pinned asmodel
         uses: actions/checkout@v7
         with:
           repository: gslf/asterism-asmodel
-          ref: 85de855206a29e5522afb5a30410ad5c94997f4d
+          ref: ${{ steps.pins.outputs.asmodel }}
           path: asterism-asmodel
       - name: Configure
         working-directory: asterism-asper
@@ -56,11 +63,18 @@ jobs:
         with:
           path: asterism-asper
           submodules: recursive
+      - name: Read asmodel pin
+        id: pins
+        shell: pwsh
+        run: |
+          $spec = Get-Content asterism-asper/dependencies.json -Raw | ConvertFrom-Json
+          if ($spec.schema -ne 1 -or $spec.asmodel.revision -notmatch '^[0-9a-f]{40}$') { throw "Invalid dependency pin" }
+          "asmodel=$($spec.asmodel.revision)" >> $env:GITHUB_OUTPUT
       - name: Checkout pinned asmodel
         uses: actions/checkout@v7
         with:
           repository: gslf/asterism-asmodel
-          ref: 85de855206a29e5522afb5a30410ad5c94997f4d
+          ref: ${{ steps.pins.outputs.asmodel }}
           path: asterism-asmodel
       - name: Configure
         working-directory: asterism-asper
@@ -84,11 +98,18 @@ jobs:
         with:
           path: asterism-asper
           submodules: recursive
+      - name: Read asmodel pin
+        id: pins
+        shell: pwsh
+        run: |
+          $spec = Get-Content asterism-asper/dependencies.json -Raw | ConvertFrom-Json
+          if ($spec.schema -ne 1 -or $spec.asmodel.revision -notmatch '^[0-9a-f]{40}$') { throw "Invalid dependency pin" }
+          "asmodel=$($spec.asmodel.revision)" >> $env:GITHUB_OUTPUT
       - name: Checkout pinned asmodel
         uses: actions/checkout@v7
         with:
           repository: gslf/asterism-asmodel
-          ref: 85de855206a29e5522afb5a30410ad5c94997f4d
+          ref: ${{ steps.pins.outputs.asmodel }}
           path: asterism-asmodel
       - name: Configure
         working-directory: asterism-asper
@@ -111,11 +132,18 @@ jobs:
         with:
           path: asterism-asper
           submodules: recursive
+      - name: Read asmodel pin
+        id: pins
+        shell: pwsh
+        run: |
+          $spec = Get-Content asterism-asper/dependencies.json -Raw | ConvertFrom-Json
+          if ($spec.schema -ne 1 -or $spec.asmodel.revision -notmatch '^[0-9a-f]{40}$') { throw "Invalid dependency pin" }
+          "asmodel=$($spec.asmodel.revision)" >> $env:GITHUB_OUTPUT
       - name: Checkout pinned asmodel
         uses: actions/checkout@v7
         with:
           repository: gslf/asterism-asmodel
-          ref: 85de855206a29e5522afb5a30410ad5c94997f4d
+          ref: ${{ steps.pins.outputs.asmodel }}
           path: asterism-asmodel
       - name: Configure
         working-directory: asterism-asper

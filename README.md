@@ -202,3 +202,7 @@ deadline becomes a remaining duration after retrieval and prompt construction.
 Shared and embedded model adapters preserve request-local consumption, partial
 output and cancellation. Unsupported model contracts return
 `ASPER_ERR_UNSUPPORTED` (ABI 6), rather than a generic busy result.
+
+Standalone CI reads its asmodel revision from `dependencies.json`. The coordinated
+Asngn release checker verifies that this dependency matches the four-component
+manifest; all standalone jobs use that same declared pin.
