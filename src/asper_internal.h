@@ -640,6 +640,7 @@ asper_err asper_enqueue_turn(asper_ctx *c, asper_role role,
 /* Rebuild the semantic-curation FIFO from durable source events not yet
  * acknowledged by a successful cycle, and acknowledge one completed batch. */
 asper_err asper_source_replay_pending(asper_ctx *c);
+asper_err asper_source_curated_admit(asper_ctx *c, size_t n);
 asper_err asper_source_mark_curated(asper_ctx *c,
                                     const asper_turn *turns, size_t n);
 

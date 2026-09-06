@@ -1,0 +1,127 @@
+{
+  "schema": 1,
+  "created_at_utc": "2026-09-06T11:54:56.674663+00:00",
+  "profile": "Linux-7.1.8-arch1-Watanare-T2-3-t2-x86_64-with-glibc2.44",
+  "method": "Open store, materialize history, close; warm copied fixture, alternating order, wait4 process peak RSS including launch/loader floor. No model generation.",
+  "events": 2057,
+  "large_event_bytes": 65536,
+  "binaries": {
+    "before": {
+      "path": "/tmp/asterism-context-before",
+      "sha256": "06be38e2a9895e0842b020f1ac6035c08be5fe6606a7581a6b7d106dc2cd67de"
+    },
+    "after": {
+      "path": "/tmp/asterism-asper-build/tests/bench_source_context",
+      "sha256": "8da741e9d1bac60187f4f47bb150cf82f0aa04ced22f4a126159b843599586f2"
+    }
+  },
+  "identical_output_sha256": "cbc54c8d19d40b172151e57bd1a8112fd600055b7138d1ef4995f9a45fd07768",
+  "runs": [
+    {
+      "variant": "before",
+      "repeat": 1,
+      "wall_seconds": 1.488782538988744,
+      "max_rss_kib": 137832,
+      "user_seconds": 1.318522,
+      "system_seconds": 0.150915
+    },
+    {
+      "variant": "after",
+      "repeat": 1,
+      "wall_seconds": 0.7085605320025934,
+      "max_rss_kib": 24784,
+      "user_seconds": 0.654335,
+      "system_seconds": 0.045519
+    },
+    {
+      "variant": "after",
+      "repeat": 2,
+      "wall_seconds": 0.7123426200123504,
+      "max_rss_kib": 24784,
+      "user_seconds": 0.668219,
+      "system_seconds": 0.033631999999999995
+    },
+    {
+      "variant": "before",
+      "repeat": 2,
+      "wall_seconds": 1.348982518989942,
+      "max_rss_kib": 138036,
+      "user_seconds": 1.208323,
+      "system_seconds": 0.130297
+    },
+    {
+      "variant": "before",
+      "repeat": 3,
+      "wall_seconds": 1.4313959619903471,
+      "max_rss_kib": 137748,
+      "user_seconds": 1.252178,
+      "system_seconds": 0.16443
+    },
+    {
+      "variant": "after",
+      "repeat": 3,
+      "wall_seconds": 0.6331920890079346,
+      "max_rss_kib": 24784,
+      "user_seconds": 0.601683,
+      "system_seconds": 0.024919999999999998
+    },
+    {
+      "variant": "after",
+      "repeat": 4,
+      "wall_seconds": 0.7393871820095228,
+      "max_rss_kib": 24784,
+      "user_seconds": 0.6628809999999999,
+      "system_seconds": 0.067052
+    },
+    {
+      "variant": "before",
+      "repeat": 4,
+      "wall_seconds": 1.4518783680105116,
+      "max_rss_kib": 137836,
+      "user_seconds": 1.255407,
+      "system_seconds": 0.177983
+    },
+    {
+      "variant": "before",
+      "repeat": 5,
+      "wall_seconds": 1.4528884360042866,
+      "max_rss_kib": 137856,
+      "user_seconds": 1.26692,
+      "system_seconds": 0.167244
+    },
+    {
+      "variant": "after",
+      "repeat": 5,
+      "wall_seconds": 0.7398015090002446,
+      "max_rss_kib": 24784,
+      "user_seconds": 0.6778299999999999,
+      "system_seconds": 0.052344999999999996
+    }
+  ],
+  "summary": {
+    "before": {
+      "wall_seconds": {
+        "median": 1.4518783680105116,
+        "min": 1.348982518989942,
+        "max": 1.488782538988744
+      },
+      "max_rss_kib": {
+        "median": 137836,
+        "min": 137748,
+        "max": 138036
+      }
+    },
+    "after": {
+      "wall_seconds": {
+        "median": 0.7123426200123504,
+        "min": 0.6331920890079346,
+        "max": 0.7398015090002446
+      },
+      "max_rss_kib": {
+        "median": 24784,
+        "min": 24784,
+        "max": 24784
+      }
+    }
+  }
+}

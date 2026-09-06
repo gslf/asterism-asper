@@ -54,6 +54,7 @@
 #define os_store_lock         asper_x_store_lock
 #define os_directory_canonical asper_x_directory_canonical
 #define os_blob_open          asper_x_blob_open
+#define os_stream_stamp       asper_x_stream_stamp
 #define os_fopen              asper_x_fopen
 #define os_now_unix           asper_x_now_unix
 #define os_monotonic_ms       asper_x_monotonic_ms
@@ -159,6 +160,11 @@ FILE     *os_fopen(const char *path, const char *mode);
 asper_err os_blob_open(const char *path, FILE **out, uint64_t *size);
 /* Resolve an operator-selected existing store directory once, before use. */
 asper_err os_directory_canonical(const char *path, char **out);
+typedef struct {
+  uint64_t size, links;
+  uint64_t modified[2], changed[2];
+} os_file_stamp;
+asper_err os_stream_stamp(FILE *stream, os_file_stamp *stamp);
 
 /* ---- misc --------------------------------------------------------------- */
 

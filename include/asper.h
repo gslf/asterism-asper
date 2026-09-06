@@ -144,7 +144,7 @@ typedef struct {
   const char *scope;
   const char *base_system_prompt;
   const char *query;
-  size_t history_tokens;       /* exact recent/pinned/source event budget */
+  size_t history_tokens;       /* selected history and heading; 0 excludes it */
   size_t checkpoint_tokens;    /* 0 excludes the checkpoint view */
   asper_token_count_fn count_tokens; /* NULL => deterministic heuristic */
   void *count_userdata;
@@ -159,8 +159,11 @@ typedef struct {
   size_t events_available;
 } asper_context_pack;
 
-/* Materialize the best bounded memory view for a model call.  Selection is
- * deterministic and never mutates/deletes source data. */
+/* Select from an indexed event prefix and pin snapshot. Context payloads are
+ * capped at 4 MiB and 4096 events, independently of the counting callback.
+ * Headings and the final joined text are budgeted; non-additive counts that
+ * exceed the envelope return LIMIT with no partial pack. Source data is never
+ * deleted. NULL/failed counters use a heuristic, not an exact tokenizer. */
 asper_err asper_context_materialize(asper_ctx *c,
                                     const asper_context_request *request,
                                     asper_context_pack *out);

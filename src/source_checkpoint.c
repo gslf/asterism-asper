@@ -58,22 +58,26 @@ asper_err asper_checkpoint_load(asper_ctx *c, const char *scope,
   path = asper_source_scope_path(c, scope, "checkpoint.txt");
   if (!path) return ASPER_ERR_IO;
   os_mutex_lock(&c->source_mu);
-  e = os_read_file(path, out_text, NULL);
+  e = asper_source_text_read(path, ASPER_EVENT_BYTES, out_text, NULL);
   os_mutex_unlock(&c->source_mu);
   free(path);
   if (e == ASPER_ERR_NOT_FOUND) {
-    asper_event *events = NULL;
-    size_t n = 0;
-    e = asper_event_list(c, scope, &events, &n);
+    asper_source_view view;
+    e = asper_source_view_open(c, scope, &view);
     if (e != ASPER_OK) return e;
-    for (size_t i = n; i > 0; i--)
-      if (events[i - 1].kind == ASPER_EVENT_CHECKPOINT) {
-        *out_text = asper_strdup(events[i - 1].text);
-        break;
+    for (uint64_t i = view.files.count; i && !*out_text; i--) {
+      asper_event event;
+      e = asper_source_view_head(&view, i, &event);
+      if (e != ASPER_OK) break;
+      if (event.kind == ASPER_EVENT_CHECKPOINT) {
+        e = asper_source_view_read(&view, i, &event);
+        if (e == ASPER_OK) { *out_text = event.text; event.text = NULL; }
       }
-    asper_events_free(events, n);
-    if (!*out_text) return ASPER_ERR_NOT_FOUND;
-    return ASPER_OK;
+      free(event.text);
+      if (e != ASPER_OK) break;
+    }
+    asper_source_view_close(&view);
+    return e == ASPER_OK && !*out_text ? ASPER_ERR_NOT_FOUND : e;
   }
   return e;
 }

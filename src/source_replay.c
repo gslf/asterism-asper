@@ -7,34 +7,54 @@ static int source_id_cmp(const void *a, const void *b) {
   return strcmp((const char *)a, (const char *)b);
 }
 
-static char (*curated_ids_parse(const char *data, size_t len,
-                                size_t *out_n))[37] {
-  char (*ids)[37] = NULL;
-  size_t n = 0, cap = len / 37 + 1;
-  const char *p, *end;
-  *out_n = 0;
-  if (!data || !len) return NULL;
-  ids = (char (*)[37])calloc(cap, sizeof *ids);
-  if (!ids) return NULL;
-  p = data;
-  end = data + len;
-  while (p < end) {
-    const char *nl = memchr(p, '\n', (size_t)(end - p));
-    size_t line_n = nl ? (size_t)(nl - p) : (size_t)(end - p);
-    if (line_n == 36) {
-      memcpy(ids[n], p, 36);
-      ids[n][36] = '\0';
-      if (asper_uuid_valid(ids[n])) n++;
+static asper_err curated_ids_parse(const char *data, size_t len,
+                                    char (**out)[37], size_t *out_n) {
+  *out = NULL; *out_n = 0;
+  if (!len) return ASPER_OK;
+  if (len % 37) return ASPER_ERR_PARSE;
+  size_t count = len / 37;
+  char (*ids)[37] = calloc(count, sizeof *ids);
+  if (!ids) return ASPER_ERR_NOMEM;
+  for (size_t i = 0; i < count; i++) {
+    memcpy(ids[i], data + i * 37, 36);
+    if (data[i * 37 + 36] != '\n' || !asper_uuid_valid(ids[i])) {
+      free(ids); return ASPER_ERR_PARSE;
     }
-    p = nl ? nl + 1 : end;
   }
-  if (n > 1) qsort(ids, n, sizeof *ids, source_id_cmp);
-  *out_n = n;
-  return ids;
+  qsort(ids, count, sizeof *ids, source_id_cmp);
+  for (size_t i = 0; i < count; i++)
+    if (!*out_n || strcmp(ids[*out_n - 1], ids[i])) {
+      if (*out_n != i) memcpy(ids[*out_n], ids[i], 37);
+      (*out_n)++;
+    }
+  *out = ids; return ASPER_OK;
 }
 
 static int curated_id_has(char (*ids)[37], size_t n, const char *id) {
   return ids && bsearch(id, ids, n, sizeof *ids, source_id_cmp) != NULL;
+}
+
+/* Curation cycles are serialized. Check before inference, and recheck before
+ * append; an external I/O failure can still make the final acknowledgement uncertain. */
+static asper_err curated_space(const char *path, size_t n) {
+  if (n > ASPER_CURATED_BYTES / 37) return ASPER_ERR_LIMIT;
+  FILE *f = NULL; uint64_t bytes = 0;
+  asper_err e = os_blob_open(path, &f, &bytes);
+  if (e == ASPER_ERR_NOT_FOUND) return ASPER_OK;
+  if (e != ASPER_OK) return e;
+  if (bytes > ASPER_CURATED_BYTES - n * 37) e = ASPER_ERR_LIMIT;
+  else if (bytes % 37) e = ASPER_ERR_PARSE;
+  if (fclose(f) && e == ASPER_OK) e = ASPER_ERR_IO;
+  return e;
+}
+
+asper_err asper_source_curated_admit(asper_ctx *c, size_t n) {
+  if (!c) return ASPER_ERR_INVALID;
+  char *path = os_path_join(c->store.root, "curated-events.log");
+  if (!path) return ASPER_ERR_NOMEM;
+  os_mutex_lock(&c->source_mu);
+  asper_err e = curated_space(path, n);
+  os_mutex_unlock(&c->source_mu); free(path); return e;
 }
 
 asper_err asper_source_mark_curated(asper_ctx *c,
@@ -43,14 +63,17 @@ asper_err asper_source_mark_curated(asper_ctx *c,
   FILE *f = NULL;
   asper_err e = ASPER_OK;
   if (!c || (!turns && n)) return ASPER_ERR_INVALID;
+  if (n > ASPER_CURATED_BYTES / 37) return ASPER_ERR_LIMIT;
+  for (size_t i = 0; i < n; i++) if (!asper_uuid_valid(turns[i].source_id)) return ASPER_ERR_INVALID;
   path = os_path_join(c->store.root, "curated-events.log");
   if (!path) return ASPER_ERR_NOMEM;
   os_mutex_lock(&c->source_mu);
+  e = curated_space(path, n);
+  if (e != ASPER_OK) { os_mutex_unlock(&c->source_mu); free(path); return e; }
   f = os_fopen(path, "ab");
   if (!f) e = ASPER_ERR_IO;
   for (size_t i = 0; e == ASPER_OK && i < n; i++)
-    if (asper_uuid_valid(turns[i].source_id) &&
-        fprintf(f, "%s\n", turns[i].source_id) < 0)
+    if (fprintf(f, "%s\n", turns[i].source_id) < 0)
       e = ASPER_ERR_IO;
   if (e == ASPER_OK && (fflush(f) != 0 || os_fsync(f) != ASPER_OK))
     e = ASPER_ERR_IO;
@@ -58,6 +81,30 @@ asper_err asper_source_mark_curated(asper_ctx *c,
   os_mutex_unlock(&c->source_mu);
   free(path);
   return e;
+}
+
+/* The pending queue still owns its accepted turns; this reader avoids a
+ * second full-scope payload allocation while recovering them. */
+static asper_err replay_scope(asper_ctx *c, const char *scope, char (*curated)[37],
+                              size_t curated_n, size_t *queued) {
+  asper_source_view view;
+  asper_err e = asper_source_view_open(c, scope, &view);
+  if (e != ASPER_OK) return e;
+  for (uint64_t sequence = 1; sequence <= view.files.count; sequence++) {
+    asper_event event;
+    e = asper_source_view_head(&view, sequence, &event);
+    if (e != ASPER_OK) break;
+    if ((event.kind == ASPER_EVENT_USER || event.kind == ASPER_EVENT_ASSISTANT) &&
+        !curated_id_has(curated, curated_n, event.id)) {
+      asper_role role = event.kind == ASPER_EVENT_USER ? ASPER_ROLE_USER : ASPER_ROLE_ASSISTANT;
+      e = asper_source_view_read(&view, sequence, &event);
+      if (e == ASPER_OK) e = asper_enqueue_turn(c, role, event.text, (asper_time)event.at, event.id, scope, event.object_ref);
+      if (e == ASPER_OK) (*queued)++;
+    }
+    free(event.text);
+    if (e != ASPER_OK) break;
+  }
+  asper_source_view_close(&view); return e;
 }
 
 asper_err asper_source_replay_pending(asper_ctx *c) {
@@ -76,31 +123,23 @@ asper_err asper_source_replay_pending(asper_ctx *c) {
     e = ASPER_ERR_NOMEM;
     goto out;
   }
-  e = os_read_file(index_path, &index, &index_len);
+  e = asper_source_text_read(index_path, ASPER_SCOPE_INDEX_BYTES, &index, &index_len);
   if (e == ASPER_ERR_NOT_FOUND) {
     e = ASPER_OK;
     goto out;
   }
   if (e != ASPER_OK) goto out;
   if (!index || index_len == 0) goto out;
-  e = os_read_file(curated_path, &curated, &curated_len);
+  e = asper_source_text_read(curated_path, ASPER_CURATED_BYTES, &curated, &curated_len);
   if (e == ASPER_ERR_NOT_FOUND) e = ASPER_OK;
   if (e != ASPER_OK) goto out;
-  curated_ids = curated_ids_parse(curated, curated_len, &curated_n);
-  if (curated_len && !curated_ids) {
-    e = ASPER_ERR_NOMEM;
-    goto out;
-  }
+  e = curated_ids_parse(curated, curated_len, &curated_ids, &curated_n);
+  if (e != ASPER_OK) goto out;
   for (char *p = index, *end = index + index_len; p < end;) {
     char *nl = memchr(p, '\n', (size_t)(end - p));
     size_t sn = nl ? (size_t)(nl - p) : (size_t)(end - p);
     char scope[65];
-    asper_event *events = NULL;
-    size_t events_n = 0;
-    if (sn == 0 || sn >= sizeof scope) {
-      p = nl ? nl + 1 : end;
-      continue;
-    }
+    if (!nl || sn == 0 || sn >= sizeof scope) { e = ASPER_ERR_PARSE; goto out; }
     memcpy(scope, p, sn);
     scope[sn] = '\0';
     if (!asper_source_scope_valid(scope)) {
@@ -108,25 +147,8 @@ asper_err asper_source_replay_pending(asper_ctx *c) {
                        "source: invalid scope in durable index");
       goto out;
     }
-    e = asper_event_list(c, scope, &events, &events_n);
+    e = replay_scope(c, scope, curated_ids, curated_n, &queued);
     if (e != ASPER_OK) goto out;
-    for (size_t i = 0; i < events_n; i++) {
-      asper_role role;
-      if (events[i].kind != ASPER_EVENT_USER &&
-          events[i].kind != ASPER_EVENT_ASSISTANT)
-        continue;
-      if (curated_id_has(curated_ids, curated_n, events[i].id)) continue;
-      role = events[i].kind == ASPER_EVENT_ASSISTANT ? ASPER_ROLE_ASSISTANT
-                                                      : ASPER_ROLE_USER;
-      e = asper_enqueue_turn(c, role, events[i].text,
-                             (asper_time)events[i].at, events[i].id, scope, events[i].object_ref);
-      if (e != ASPER_OK) {
-        asper_events_free(events, events_n);
-        goto out;
-      }
-      queued++;
-    }
-    asper_events_free(events, events_n);
     p = nl ? nl + 1 : end;
   }
   if (queued)

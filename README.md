@@ -189,6 +189,9 @@ erasure guard prevents recovery or curation from repopulating deleted data.
 Selective retention and authenticated multi-user administration remain separate.
 [Object reads](docs/source-objects.md) verify the full content hash while retaining
 only the requested slice, with an explicit 64 MiB object bound and hashing cost.
+[Progressive history](docs/source-context.md) selects old pins and recent events
+from an indexed prefix without retaining the complete scope's payloads. Context
+has independent byte/event limits and verifies every selected source frame.
 
 Recall reports deadline expiry as `ASPER_ERR_TIMEOUT`. Its absolute operation
 deadline becomes a remaining duration after retrieval and prompt construction.

@@ -18,10 +18,11 @@ static asper_err register_scope_locked(asper_ctx *c, const char *scope) {
   path = os_path_join(dir, "index.log");
   free(dir);
   if (!path) return ASPER_ERR_NOMEM;
-  e = os_read_file(path, &data, &len);
+  e = asper_source_text_read(path, ASPER_SCOPE_INDEX_BYTES, &data, &len);
   if (e == ASPER_ERR_NOT_FOUND) e = ASPER_OK;
   if (e != ASPER_OK) goto out;
   if (data && len) {
+    if (data[len-1] != '\n') { e = ASPER_ERR_PARSE; goto out; }
     for (char *p = data, *end = data + len; p < end;) {
       char *nl = memchr(p, '\n', (size_t)(end - p));
       size_t n = nl ? (size_t)(nl - p) : (size_t)(end - p);
@@ -33,6 +34,7 @@ static asper_err register_scope_locked(asper_ctx *c, const char *scope) {
     }
   }
   if (!found) {
+    if (strlen(scope) + 1 > ASPER_SCOPE_INDEX_BYTES - len) { e = ASPER_ERR_LIMIT; goto out; }
     f = os_fopen(path, "ab");
     if (!f || fprintf(f, "%s\n", scope) < 0 || fflush(f) != 0 ||
         os_fsync(f) != ASPER_OK)
@@ -52,32 +54,12 @@ void asper_events_free(asper_event *events, size_t n) {
 }
 
 static asper_err apply_pin_log(asper_ctx *c, const char *scope, event_scan *scan) {
-  char *path = asper_source_scope_path(c, scope, "pins.log");
-  char line[48];
-  uint64_t bytes;
-  asper_err err;
-  FILE *f;
-  if (!path) return ASPER_ERR_NOMEM;
-  err = os_file_size(path, &bytes);
-  if (err == ASPER_ERR_NOT_FOUND) { free(path); return ASPER_OK; }
-  if (err != ASPER_OK || bytes > 8u*1024u*1024u) {
-    free(path); return err == ASPER_OK ? ASPER_ERR_INVALID : err;
-  }
-  f = os_fopen(path, "rb"); free(path);
-  if (!f) return ASPER_ERR_IO;
-  while (fgets(line, sizeof line, f)) {
-    if (strlen(line) != 39 || line[36] != ' ' || line[38] != '\n' ||
-        (line[37] != '0' && line[37] != '1')) {
-      err = ASPER_ERR_PARSE; break;
-    }
-    line[36] = 0;
-    if (!asper_uuid_valid(line)) { err = ASPER_ERR_PARSE; break; }
-    for (size_t i = 0; i < scan->n; i++)
-      if (!strcmp(scan->v[i].id, line)) scan->v[i].pinned = line[37] == '1';
-  }
-  if (ferror(f)) err = ASPER_ERR_IO;
-  fclose(f);
-  return err;
+  asper_source_pins pins;
+  asper_err e = asper_source_pins_load(c, scope, &pins);
+  if (e == ASPER_OK)
+    for (size_t i = 0; i < scan->n; i++) asper_source_pins_apply(&pins, &scan->v[i]);
+  free(pins.rows);
+  return e;
 }
 
 asper_err asper_event_append(asper_ctx *c, const asper_event_input *event,
@@ -204,6 +186,11 @@ asper_err asper_event_set_pinned(asper_ctx *c, const char *scope,
   path = asper_source_scope_path(c, scope, "pins.log");
   if (!path) return ASPER_ERR_IO;
   os_mutex_lock(&c->source_mu);
+  uint64_t bytes = 0;
+  e = os_file_size(path, &bytes);
+  if (e == ASPER_ERR_NOT_FOUND) e = ASPER_OK;
+  if (e == ASPER_OK && bytes > ASPER_PIN_BYTES - 39) e = ASPER_ERR_LIMIT;
+  if (e != ASPER_OK) { os_mutex_unlock(&c->source_mu); free(path); return e; }
   f = os_fopen(path, "ab");
   if (!f || fprintf(f, "%s %d\n", event_id, pinned ? 1 : 0) < 0 ||
       fflush(f) != 0 || os_fsync(f) != ASPER_OK)

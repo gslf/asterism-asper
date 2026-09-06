@@ -116,10 +116,13 @@ set(ASPER_SOURCES
   src/store_compact.c
   src/record_table.c
   src/source_paths.c
+  src/source_view.c
+  src/source_pins.c
   src/source_events.c
   src/source_objects.c
   src/source_checkpoint.c
   src/source_context.c
+  src/source_history.c
   src/source_replay.c
   src/knowledge_codec.c
   src/knowledge_store.c
@@ -128,6 +131,7 @@ set(ASPER_SOURCES
   src/knowledge_api.c
   src/knowledge_history.c
   src/event_frame.c
+  src/event_index.c
   src/event_log.c
   src/journal.c
   src/record_encode.c
@@ -149,6 +153,7 @@ set(ASPER_SOURCES
   src/models.c
   src/os_common.c
   src/os_blob.c
+  src/os_stamp.c
 )
 if(ASPER_WITH_LLAMA)
   list(APPEND ASPER_SOURCES src/llama_guard.cpp)

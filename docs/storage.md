@@ -51,6 +51,10 @@ provides a checked whole-store export and explicit resumable erasure, including
 internal derivatives and backups. Selective retention and erasure remain separate
 work. A durable `.erase.pending` guard blocks open before recovery and file logging.
 
+[Source history](source-context.md) uses bounded metadata reads and progressive
+payload selection. Scope, pin, acknowledgement and checkpoint limits are explicit;
+requested corrupt projections fail instead of silently disappearing from context.
+
 Tests inject short writes, flush errors and uncertain sync; corrupt complete
 payloads and snapshots; reject legacy versions; and interrupt a process at five
 compaction boundaries. Recovery preserves acknowledged updates without replaying

@@ -1,17 +1,11 @@
 /* Hosts attach granular evidence; the curator cannot certify its own claims. */
 #include "knowledge.h"
+#include "source_internal.h"
 #include <stdlib.h>
 #include <string.h>
 
 static bool text_ok(const char *s, size_t cap, bool allow_empty) {
   return memchr(s,0,cap) && (allow_empty || s[0]) && asper_utf8_count(s,NULL);
-}
-static bool scope_ok(const char *scope) {
-  if (!strcmp(scope,".") || !strcmp(scope,"..")) return false;
-  for (const char *p = scope; *p; p++)
-    if (!((*p >= 'a' && *p <= 'z') || (*p >= 'A' && *p <= 'Z') ||
-          (*p >= '0' && *p <= '9') || *p == '.' || *p == '_' || *p == '-')) return false;
-  return true;
 }
 static bool boundary(const char *text, size_t i) { return ((unsigned char)text[i]&0xc0) != 0x80; }
 static bool range_ok(const char *text, size_t begin, size_t end) {
@@ -41,7 +35,7 @@ asper_err knowledge_validate(asper_ctx *c, const asper_record *r, const asper_gr
   if (r && strlen(r->content) > 65536) return ASPER_ERR_LIMIT;
   for (size_t i = 0; i < g->sources_n; i++) {
     const asper_source_span *s = &g->sources[i];
-    if (!text_ok(s->scope,sizeof s->scope,false) || !scope_ok(s->scope) || !text_ok(s->event_id,sizeof s->event_id,false) ||
+    if (!text_ok(s->scope,sizeof s->scope,false) || !asper_source_scope_valid(s->scope) || !text_ok(s->event_id,sizeof s->event_id,false) ||
         !asper_uuid_valid(s->event_id) || !s->sequence || s->sequence > INT64_MAX ||
         s->source_begin >= s->source_end || s->claim_begin >= s->claim_end ||
         s->source_end > INT64_MAX || s->claim_end > INT64_MAX ||

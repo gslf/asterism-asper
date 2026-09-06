@@ -41,7 +41,14 @@ set(ASPER_TEST_PROGRAMS
   test_log
   test_stats_projects
   test_source
+  test_source_context
 )
+
+# Built only when explicitly requested; it is not a behavioral benchmark.
+add_executable(bench_source_context EXCLUDE_FROM_ALL bench_source_context.c)
+target_link_libraries(bench_source_context PRIVATE asper_static)
+target_compile_options(bench_source_context PRIVATE ${ASPER_C_FLAGS})
+set_target_properties(bench_source_context PROPERTIES C_STANDARD 99 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF)
 
 foreach(test_name IN LISTS ASPER_TEST_PROGRAMS)
   set(test_sources ${test_name}.c fakes.c)
@@ -69,6 +76,7 @@ foreach(test_name IN LISTS ASPER_TEST_PROGRAMS)
   target_link_libraries(${test_name} PRIVATE asper_static)
 
   add_test(NAME ${test_name} COMMAND ${test_name})
+  set_tests_properties(${test_name} PROPERTIES TIMEOUT 120)
 endforeach()
 
 # Exercise the current public ABI through the shared library.

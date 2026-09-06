@@ -8,7 +8,8 @@ int asper_source_scope_valid(const char *scope) {
   if (!scope || !(n = strlen(scope)) || n > 64) return 0;
   for (size_t i = 0; i < n; i++) {
     unsigned char ch = (unsigned char)scope[i];
-    if (!(isalnum(ch) || ch == '_' || ch == '-' || ch == '.')) return 0;
+    if (!((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') ||
+          (ch >= '0' && ch <= '9') || ch == '_' || ch == '-' || ch == '.')) return 0;
   }
   return strcmp(scope, ".") != 0 && strcmp(scope, "..") != 0;
 }
@@ -66,4 +67,28 @@ char *asper_source_object_path(asper_ctx *c, const char *ref) {
   path = os_path_join(dir, name);
   free(dir);
   return path;
+}
+
+/* Metadata reads are bounded before allocation and must be complete UTF-8. */
+asper_err asper_source_text_read(const char *path, size_t limit, char **out, size_t *size) {
+  FILE *f = NULL; uint64_t bytes = 0;
+  *out = NULL; if (size) *size = 0;
+  asper_err e = os_blob_open(path, &f, &bytes);
+  if (e != ASPER_OK) return e;
+  char *text = NULL;
+  if (bytes > limit || bytes >= SIZE_MAX) e = ASPER_ERR_LIMIT;
+  else {
+    text = malloc((size_t)bytes + 1);
+    if (!text) e = ASPER_ERR_NOMEM;
+    else if (fread(text, 1, (size_t)bytes, f) != bytes || fgetc(f) != EOF) e = ASPER_ERR_PARSE;
+    else {
+      text[bytes] = 0;
+      if (memchr(text, 0, (size_t)bytes) || !asper_utf8_count(text, NULL)) e = ASPER_ERR_PARSE;
+    }
+  }
+  if (ferror(f)) e = ASPER_ERR_IO;
+  if (fclose(f) && e == ASPER_OK) e = ASPER_ERR_IO;
+  if (e != ASPER_OK) free(text);
+  else { *out = text; if (size) *size = (size_t)bytes; }
+  return e;
 }

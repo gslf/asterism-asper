@@ -59,8 +59,9 @@ static int number(char **p, unsigned long long max, unsigned long long *out) {
   return 1;
 }
 
-asper_err asper_event_frame_read(FILE *f, asper_event *e) {
-  char line[352], hash[65], header_hash[65], expected[65], head[192];
+asper_err asper_event_frame_head(FILE *f, asper_event *e, size_t *object_bytes,
+                                  size_t *text_bytes, char hash[65]) {
+  char line[352], header_hash[65], expected[65], head[192];
   uint8_t bytes[32];
   unsigned long long seq;
   long long at;
@@ -68,7 +69,6 @@ asper_err asper_event_frame_read(FILE *f, asper_event *e) {
   unsigned long long value;
   char *p, *end;
   int used;
-  asper_err err = ASPER_ERR_PARSE;
   memset(e, 0, sizeof *e);
   if (!fgets(line, sizeof line, f))
     return ferror(f) ? ASPER_ERR_IO : ASPER_ERR_NOT_FOUND;
@@ -112,6 +112,17 @@ asper_err asper_event_frame_read(FILE *f, asper_event *e) {
   asper_sha256(head, (size_t)len, bytes);
   hex_digest(bytes, expected);
   if (strcmp(expected, header_hash)) return ASPER_ERR_PARSE;
+  *object_bytes = obj; *text_bytes = text;
+  return ASPER_OK;
+}
+
+asper_err asper_event_frame_read(FILE *f, asper_event *e) {
+  size_t obj = 0, text = 0;
+  char hash[65], expected[65], head[192];
+  asper_err err = asper_event_frame_head(f, e, &obj, &text, hash);
+  if (err != ASPER_OK) return err;
+  (void)prefix(head, e, obj, text);
+  err = ASPER_ERR_PARSE;
   if (fread(e->object_ref, 1, obj, f) != obj) goto torn;
   if (obj) {
     if (strncmp(e->object_ref, "sha256:", 7)) goto done;

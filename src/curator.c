@@ -746,6 +746,8 @@ asper_err asper_curation_cycle(asper_ctx *c, bool force)
   asper_cop *cops = NULL;
   size_t n_cops = 0, bad = 0;
 
+  rc = asper_source_curated_admit(c, n_turns);
+  if (rc != ASPER_OK) goto fail;
   project=turns[0].project[0] ? asper_strdup(turns[0].project) : NULL;
   if (turns[0].project[0] && !project) { rc=ASPER_ERR_NOMEM;goto fail; }
 
@@ -839,8 +841,8 @@ asper_err asper_curation_cycle(asper_ctx *c, bool force)
       asper_err ack = asper_source_mark_curated(c, turns, n_turns);
       if (ack != ASPER_OK)
         asper_log(c, ASPER_LOG_WARN, "source",
-                  "curation acknowledgement failed (%s); batch will be "
-                  "safely replayed after restart", asper_err_name(ack));
+                  "curation acknowledgement failed (%s); retry after restart may "
+                  "propose changes to records already updated by this cycle", asper_err_name(ack));
     }
 
     size_t cycle_no;
