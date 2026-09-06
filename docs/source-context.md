@@ -86,7 +86,8 @@ For a baseline revision predating the target, compile the same
 and `libasmodel.a`, with the same compiler/options and curl/math dependencies.
 The recorded comparison uses `-O3 -DNDEBUG -std=c99 -fPIE` for both probe builds.
 The baseline Asper revision is `68281adb0788cd9a72fabdc52c98fae7d47ca379`;
-the comparison implementation is the progressive reader in this commit.
+the comparison implementation is the progressive reader at
+`5018d7d0ab76b8567fcfa97f91872405a934e6e3`.
 
 The driver uses a freshly copied, warm fixture for each run and alternates the
 variant order. It records executable hashes, each measurement, observed ranges

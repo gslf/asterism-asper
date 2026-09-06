@@ -20,6 +20,7 @@
 
 #include "asper_internal.h"
 #include "curation_receipt.h"
+#include "curation_input.h"
 
 #define CURATOR_RELATED_PER_TURN 3
 #define CURATOR_RELATED_CAP 12
@@ -202,20 +203,6 @@ static const char *load_instruction(asper_ctx *c, char **heap_out)
   return ASPER_DEFAULT_INSTRUCTION;
 }
 
-/* "USER: text" / "ASSISTANT: text" as a malloc'd string. */
-static char *turn_line(const asper_turn *t)
-{
-  asper_buf b;
-  asper_buf_init(&b);
-  const char *role = (t->role == ASPER_ROLE_USER) ? "USER" : "ASSISTANT";
-  if (asper_buf_printf(&b, "%s: %s", role, t->text ? t->text : "") !=
-      ASPER_OK) {
-    asper_buf_free(&b);
-    return NULL;
-  }
-  return asper_buf_detach(&b);
-}
-
 /* .score desc, id asc (determinism for handle ordering); collect_related
  * stores the cosine in .score, so this is similarity order. */
 static int rec_score_desc_cmp(const void *pa, const void *pb)
@@ -313,9 +300,8 @@ static asper_err collect_related(asper_ctx *c, const asper_turn *turns,
 
 /* ---- cycle prompt --------------------------------------------------------- */
 
-static asper_err build_cycle_prompt(asper_ctx *c, asper_record *const *mems,
-                                    size_t n_mems, const asper_turn *turns,
-                                    size_t n_turns, char **out)
+static asper_err build_cycle_prompt(asper_record *const *mems,
+                                    size_t n_mems, const char *transcript, char **out)
 {
   asper_buf b;
   asper_buf_init(&b);
@@ -336,39 +322,8 @@ static asper_err build_cycle_prompt(asper_ctx *c, asper_record *const *mems,
                              mems[i]->content ? mems[i]->content : "");
     }
   }
-  if (e == ASPER_OK)
-    e = asper_buf_appends(&b, "\nConversation:\n");
-
-  /* Trim oldest turns so the transcript fits cfg.transcript_tokens; the
-   * newest turn is always kept. */
-  size_t start = n_turns;
-  if (e == ASPER_OK && n_turns > 0) {
-    int total = 0;
-    while (start > 0) {
-      char *line = turn_line(&turns[start - 1]);
-      if (!line) {
-        e = ASPER_ERR_NOMEM;
-        break;
-      }
-      int cost = asper_estimate_tokens(c, line);
-      free(line);
-      if (total + cost > c->cfg.transcript_tokens && start < n_turns)
-        break;
-      total += cost;
-      start--;
-    }
-  }
-  for (size_t i = start; i < n_turns && e == ASPER_OK; i++) {
-    char *line = turn_line(&turns[i]);
-    if (!line) {
-      e = ASPER_ERR_NOMEM;
-      break;
-    }
-    e = asper_buf_appends(&b, line);
-    free(line);
-    if (e == ASPER_OK)
-      e = asper_buf_appendc(&b, '\n');
-  }
+  if (e == ASPER_OK) e = asper_buf_appendc(&b, '\n');
+  if (e == ASPER_OK) e = asper_buf_appends(&b, transcript);
 
   if (e != ASPER_OK) {
     asper_buf_free(&b);
@@ -737,7 +692,7 @@ asper_err asper_curation_cycle(asper_ctx *c, bool force)
   if (n_turns == 0)
     return ASPER_OK;
 
-  char *project = NULL;
+  char *project = NULL, *transcript = NULL;
   asper_record **handles = NULL;
   size_t n_handles = 0;
   char *prompt = NULL;
@@ -748,6 +703,13 @@ asper_err asper_curation_cycle(asper_ctx *c, bool force)
   asper_cop *cops = NULL;
   size_t n_cops = 0, bad = 0;
 
+  size_t included = 0;
+  rc = asper_curation_transcript(c, turns, n_turns, &included, &transcript);
+  if (rc != ASPER_OK) goto out;
+  if (included < n_turns && !restore_turns(c, turns + included, n_turns - included)) {
+    rc = ASPER_ERR_NOMEM; goto out;
+  }
+  n_turns = included;
   rc = asper_curation_admit(c, n_turns);
   if (rc != ASPER_OK) goto fail;
   project=turns[0].project[0] ? asper_strdup(turns[0].project) : NULL;
@@ -757,7 +719,7 @@ asper_err asper_curation_cycle(asper_ctx *c, bool force)
   if (rc != ASPER_OK)
     goto fail;
 
-  rc = build_cycle_prompt(c, handles, n_handles, turns, n_turns, &prompt);
+  rc = build_cycle_prompt(handles, n_handles, transcript, &prompt);
   if (rc != ASPER_OK)
     goto fail;
 
@@ -873,6 +835,7 @@ out:
   free(gbnf);
   free(prompt);
   free_record_array(handles, n_handles);
+  free(transcript);
   free(project);
   free_turns(turns, n_turns);
   return rc;

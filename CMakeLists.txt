@@ -125,6 +125,7 @@ set(ASPER_SOURCES
   src/source_history.c
   src/source_replay.c
   src/curation_codec.c
+  src/curation_input.c
   src/curation_receipt.c
   src/knowledge_codec.c
   src/knowledge_store.c

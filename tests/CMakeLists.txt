@@ -36,6 +36,7 @@ set(ASPER_TEST_PROGRAMS
   test_inject_golden
   test_curator_cycles
   test_curation_receipts
+  test_curation_input
   test_review_recall
   test_config
   test_json

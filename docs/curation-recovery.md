@@ -69,9 +69,22 @@ offline maintenance contract, not an authenticated multi-tenant API.
 
 ## Bounds and validation
 
-Each batch selects at most 256 queued events, retaining scope/revision boundaries.
-Full flush drains the accepted queue through multiple bounded batches in both
-threaded and non-threaded builds. Receipts are at most 1 MiB, with at most 64 KiB
+Each batch considers at most 256 queued events, retaining scope/revision boundaries.
+Before retrieval or inference, the runtime selects the oldest complete prefix
+that fits `transcript_tokens` and a 64 KiB rendered transcript envelope. It counts
+the joined text, including roles and the heading; a missing or failed counter
+uses the existing heuristic. This is not an exact remote token guarantee.
+Only those inputs reach retrieval, generation, candidate provenance and the
+receipt. The omitted tail remains queued. A failed generation restores the selected
+prefix before the tail and any newly appended events.
+
+An oversized first event returns `ASPER_ERR_LIMIT` without inference or an
+acknowledgement. It remains at the head of the queue. Raising the token budget
+can admit it within the byte envelope; larger events require an explicit future
+segmentation or defer contract. The runtime never truncates and acknowledges
+such an event silently. Full flush drains fitting inputs through multiple bounded
+batches in both threaded and non-threaded builds, stopping on an error.
+Receipts are at most 1 MiB, with at most 64 KiB
 of proposal text and twelve handles. History uses the 512 MiB event-log limit;
 history and acknowledgement capacity are checked before inference. The 8 MiB
 acknowledgement set is rewritten atomically, adding work proportional to that set
@@ -92,6 +105,15 @@ acknowledgements, Unicode/NUL/schema rejection, quota admission before model cal
 a 257-event full flush, temporary aliases and six offline integration cases using
 a real interrupted C batch and MCP restart. Linux threaded sanitizer and
 non-threaded suites pass; these are not power-loss durability tests.
+
+Four input-coverage cases additionally check exact receipt-to-prompt membership,
+ordered retry with a reentrant append, oversized inputs, joined token counts and
+the byte cap with a zero-returning counter. The same first regression case,
+compiled against `cb1ed0b` and the revised library, reproduced silent omission:
+with twenty inputs and a forty-token transcript budget, the prior runtime sent
+thirteen inputs in one call while acknowledging all twenty. The revised runtime
+sent all twenty once across three calls, with matching receipts. These are
+scripted contract checks, not model-quality measurements.
 
 ## Reproduced baseline failure
 

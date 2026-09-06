@@ -65,7 +65,7 @@ int asper_estimate_tokens(asper_ctx *c, const char *text)
 {
   if (!text)
     return 0;
-  if (c && c->cfg.token_estimator == ASPER_TOKENS_CURATOR && c->has_curator) {
+  if (c && c->cfg.token_estimator == ASPER_TOKENS_CURATOR && c->has_curator && c->curator.count_tokens) {
     int n = c->curator.count_tokens(c->curator.ud, text);
     if (n >= 0)
       return n;
