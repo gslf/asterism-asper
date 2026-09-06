@@ -115,7 +115,12 @@ set(ASPER_SOURCES
   src/store_transaction.c
   src/store_compact.c
   src/record_table.c
-  src/source.c
+  src/source_paths.c
+  src/source_events.c
+  src/source_objects.c
+  src/source_checkpoint.c
+  src/source_context.c
+  src/source_replay.c
   src/knowledge_codec.c
   src/knowledge_store.c
   src/knowledge_validate.c
@@ -143,6 +148,7 @@ set(ASPER_SOURCES
   src/curator_llama.c
   src/models.c
   src/os_common.c
+  src/os_blob.c
 )
 if(ASPER_WITH_LLAMA)
   list(APPEND ASPER_SOURCES src/llama_guard.cpp)

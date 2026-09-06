@@ -183,6 +183,13 @@ backup validation, sync policy, quotas and fault tests. Complete corruption and
 uncertain durability fail closed. Old store versions require deliberate conversion;
 there is no automatic migration or compatibility path.
 
+[Offline maintenance](docs/data-governance.md) provides checked whole-store export,
+verification and resumable erasure on Linux without loading models. A persistent
+erasure guard prevents recovery or curation from repopulating deleted data.
+Selective retention and authenticated multi-user administration remain separate.
+[Object reads](docs/source-objects.md) verify the full content hash while retaining
+only the requested slice, with an explicit 64 MiB object bound and hashing cost.
+
 Recall reports deadline expiry as `ASPER_ERR_TIMEOUT`. Its absolute operation
 deadline becomes a remaining duration after retrieval and prompt construction.
 Shared and embedded model adapters preserve request-local consumption, partial

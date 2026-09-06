@@ -93,4 +93,10 @@ if(TARGET asper-mcp)
       "-DMCP_ROOT_FLAG=--root"
       -P "${CMAKE_CURRENT_SOURCE_DIR}/mcp_smoke.cmake")
   set_tests_properties(test_mcp_protocol PROPERTIES TIMEOUT 60)
+  if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    find_package(Python3 3.11 REQUIRED COMPONENTS Interpreter)
+    add_test(NAME test_store_admin COMMAND ${Python3_EXECUTABLE}
+      ${CMAKE_CURRENT_SOURCE_DIR}/test_store_admin.py --mcp $<TARGET_FILE:asper-mcp>)
+    set_tests_properties(test_store_admin PROPERTIES TIMEOUT 120)
+  endif()
 endif()

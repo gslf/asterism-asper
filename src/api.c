@@ -618,16 +618,10 @@ static asper_err asper_open_impl(const asper_open_params *p,
   if (e == ASPER_OK) e = cfg_base_join(base_dir, &c->cfg.embed_model_path);
   if (e != ASPER_OK) goto fail;
 
-  /* 2. Logging: file sink per config + default stderr WARN+ callback. */
-  e = asper_log_open(c);
-  if (e != ASPER_OK) goto fail;
-  c->log_cb = asper_default_log_cb;
-  c->log_ud = NULL;
-
-  /* 3. Clock. */
+  /* 2. Clock. File logging starts only after store admission. */
   c->clock = clk ? *clk : asper_clock_system();
 
-  /* 4. Store: directories, manifest, section files, journal replay. */
+  /* 3. Store ownership precedes recovery, logging and background work. */
   c->store.root = asper_strdup(p->memory_root);
   if (!c->store.root) {
     e = ASPER_ERR_NOMEM;
@@ -636,12 +630,34 @@ static asper_err asper_open_impl(const asper_open_params *p,
   e = os_mkdir_p(c->store.root);
   if (e != ASPER_OK) goto fail;
   {
+    char *canonical = NULL;
+    e = os_directory_canonical(c->store.root, &canonical);
+    if (e != ASPER_OK) goto fail;
+    free(c->store.root); c->store.root = canonical;
+  }
+  {
     char *lock_path = os_path_join(c->store.root, ".writer.lock");
     if (!lock_path) { e = ASPER_ERR_NOMEM; goto fail; }
     c->store_lock = os_store_lock(lock_path);
     free(lock_path);
     if (!c->store_lock) { e = ASPER_ERR_BUSY; goto fail; }
   }
+  {
+    char *guard = os_path_join(c->store.root, ".erase.pending");
+    FILE *f = NULL; uint64_t bytes = 0;
+    if (!guard) { e = ASPER_ERR_NOMEM; goto fail; }
+    e = os_blob_open(guard, &f, &bytes);
+    free(guard);
+    if (f) fclose(f);
+    /* Any guard, even empty or damaged, prevents recovery from resurrecting
+     * erased data. Only explicit offline maintenance may finish the erasure. */
+    if (e == ASPER_OK) { e = ASPER_ERR_BUSY; goto fail; }
+    if (e != ASPER_ERR_NOT_FOUND) goto fail;
+  }
+  e = asper_log_open(c);
+  if (e != ASPER_OK) goto fail;
+  c->log_cb = asper_default_log_cb;
+  c->log_ud = NULL;
   e = asper_store_open(c);
   if (e != ASPER_OK) goto fail;
   store_opened = true;

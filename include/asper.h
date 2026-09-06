@@ -118,9 +118,11 @@ asper_err asper_event_set_pinned(asper_ctx *c, const char *scope,
                                  const char *event_id, int pinned);
 void asper_events_free(asper_event *events, size_t n);
 
-/* Content-addressed exact objects.  Writes are atomic and deduplicated.
- * offset/max_bytes implement lossless range reads; max_bytes == 0 means the
- * complete remainder. */
+/* Content-addressed exact objects, up to 64 MiB each. Writes are atomic and
+ * deduplicated; references use lowercase SHA-256. Range reads verify the whole
+ * object hash while allocating only the selected bytes plus a small buffer.
+ * offset/max_bytes implement exact range reads; max_bytes == 0 means the
+ * complete remainder. Corruption returns PARSE with no partial data. */
 asper_err asper_object_put(asper_ctx *c, const void *data, size_t size,
                            char out_ref[72]);
 asper_err asper_object_read(asper_ctx *c, const char *object_ref,

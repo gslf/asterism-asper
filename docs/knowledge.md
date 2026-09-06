@@ -58,8 +58,10 @@ reopen; later reopening an exact event verifies its frame again.
 The implementation bounds live definitions and observed resource keys to 16,384,
 claim text to 64 KiB and the journal to the shared 512 MiB event-log quota. It uses
 a sorted UUID table and bounded support propagation, not a universal knowledge
-graph. The history is append-only and is not automatically pruned. Retention,
-export/delete across every derived store, owner authorization, automatic semantic
+graph. The history is append-only and is not automatically pruned. Whole-store
+[offline maintenance](data-governance.md) includes this history and its internal
+derivatives in export and erasure. Selective retention/deletion, coordination with
+stores outside this root, owner authorization, automatic semantic
 contradiction discovery and curator-proposed granular support remain separate
 milestones. Candidate source UUIDs from a curation batch are labeled as candidates
 and must not be interpreted as precise supporting spans.

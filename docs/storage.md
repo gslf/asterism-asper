@@ -46,8 +46,10 @@ sync guarantee in this implementation.
 Bounds are 65,536 live/deprecated records, 4,093 projects, 16 MiB per operation or
 section snapshot, 512 MiB per journal/raw backup and 1 MiB per transaction marker.
 Manifest reads are bounded to 64 KiB. These are per-store/per-file bounds, not a
-quota on the entire source/object/archive tree. Retention and export/delete across
-all derivatives remain separate work.
+quota on the entire source/object/archive tree. [Offline maintenance](data-governance.md)
+provides a checked whole-store export and explicit resumable erasure, including
+internal derivatives and backups. Selective retention and erasure remain separate
+work. A durable `.erase.pending` guard blocks open before recovery and file logging.
 
 Tests inject short writes, flush errors and uncertain sync; corrupt complete
 payloads and snapshots; reject legacy versions; and interrupt a process at five

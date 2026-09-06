@@ -88,6 +88,64 @@ TEST(object_range_and_dedup) {
   asper_test_rmtree(root);
 }
 
+TEST(object_range_rejects_corruption_outside_the_slice) {
+  char root[256], ref[72], path[512];
+  ASSERT_TRUE(asper_test_tmpdir(root));
+  fake_clock_set(&g_clk, 1785319920LL); fake_curator_init(&g_cur);
+  asper_ctx *c = open_store(root); ASSERT_TRUE(c);
+  ASSERT_OK(asper_object_put(c, "original data", 13, ref));
+  snprintf(path, sizeof path, "%s/objects/%s.bin", root, ref + 7);
+  ASSERT_OK(os_write_file(path, "original datX", 13));
+  void *slice = NULL; size_t n = 0;
+  asper_err e = asper_object_read(c, ref, 0, 1, &slice, &n);
+  int empty = !slice && n == 0;
+  asper_free(slice); asper_close(c); fake_curator_dispose(&g_cur); asper_test_rmtree(root);
+  ASSERT_EQ_INT(e, ASPER_ERR_PARSE); ASSERT_TRUE(empty);
+}
+
+TEST(object_limits_empty_and_invalid_ranges) {
+  char root[256], ref[72], path[512];
+  ASSERT_TRUE(asper_test_tmpdir(root));
+  fake_clock_set(&g_clk, 1785319920LL); fake_curator_init(&g_cur);
+  asper_ctx *c = open_store(root); ASSERT_TRUE(c);
+  ASSERT_OK(asper_object_put(c, NULL, 0, ref));
+  void *slice = NULL; size_t n = 0;
+  ASSERT_OK(asper_object_read(c, ref, 0, 0, &slice, &n));
+  ASSERT_EQ_INT(n, 0); asper_free(slice); slice = NULL;
+  ASSERT_ERR(asper_object_read(c, ref, SIZE_MAX, SIZE_MAX, &slice, &n), ASPER_ERR_INVALID);
+  ASSERT_ERR(asper_object_put(c, "x", 64u * 1024u * 1024u + 1, ref), ASPER_ERR_LIMIT);
+  ASSERT_EQ_INT(ref[0], 0);
+  strcpy(ref, "shared input");
+  ASSERT_OK(asper_object_put(c, ref, 12, ref));
+  ASSERT_OK(asper_object_read(c, ref, 0, 0, &slice, &n));
+  ASSERT_TRUE(n == 12 && !memcmp(slice, "shared input", 12));
+  asper_free(slice); slice = NULL;
+  ASSERT_OK(asper_object_put(c, "one", 3, ref));
+  snprintf(path, sizeof path, "%s/objects/%s.bin", c->store.root, ref + 7);
+  ASSERT_OK(os_truncate(path, 64u * 1024u * 1024u + 1));
+  ASSERT_ERR(asper_object_read(c, ref, 0, 1, &slice, &n), ASPER_ERR_LIMIT);
+  ASSERT_TRUE(!slice && !n);
+  asper_close(c); fake_curator_dispose(&g_cur); asper_test_rmtree(root);
+}
+#ifndef _WIN32
+TEST(object_aliases_and_special_files_are_not_read) {
+  char root[256], ref[72], path[512], other[512];
+  ASSERT_TRUE(asper_test_tmpdir(root));
+  fake_clock_set(&g_clk, 1785319920LL); fake_curator_init(&g_cur);
+  asper_ctx *c = open_store(root); ASSERT_TRUE(c);
+  ASSERT_OK(asper_object_put(c, "known", 5, ref));
+  snprintf(path, sizeof path, "%s/objects/%s.bin", c->store.root, ref + 7);
+  snprintf(other, sizeof other, "%s/external.bin", root);
+  ASSERT_OK(os_write_file(other, "known", 5));
+  ASSERT_EQ_INT(unlink(path), 0); ASSERT_EQ_INT(symlink(other, path), 0);
+  void *slice = NULL; size_t n = 0;
+  ASSERT_ERR(asper_object_read(c, ref, 0, 1, &slice, &n), ASPER_ERR_INVALID);
+  ASSERT_EQ_INT(unlink(path), 0); ASSERT_EQ_INT(mkfifo(path, 0600), 0);
+  ASSERT_ERR(asper_object_read(c, ref, 0, 1, &slice, &n), ASPER_ERR_INVALID);
+  asper_close(c); fake_curator_dispose(&g_cur); asper_test_rmtree(root);
+}
+#endif
+
 TEST(checkpoint_and_context_survive_reopen) {
   char root[256], id[37];
   asper_ctx *c;
@@ -292,6 +350,11 @@ TEST_LIST = {
     TEST_ENTRY(event_index_rebuild_and_late_page),
     TEST_ENTRY(event_corruption_is_not_repaired_as_a_torn_tail),
     TEST_ENTRY(object_range_and_dedup),
+    TEST_ENTRY(object_range_rejects_corruption_outside_the_slice),
+    TEST_ENTRY(object_limits_empty_and_invalid_ranges),
+#ifndef _WIN32
+    TEST_ENTRY(object_aliases_and_special_files_are_not_read),
+#endif
     TEST_ENTRY(checkpoint_and_context_survive_reopen),
     TEST_ENTRY(torn_tail_is_repaired_without_losing_complete_events),
     TEST_ENTRY(uncurated_events_replay_once_after_restart),

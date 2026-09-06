@@ -66,6 +66,20 @@ TEST(old_store_requires_explicit_conversion) {
   fake_curator_dispose(&curator); asper_test_rmtree(root);
 }
 
+TEST(erasure_guard_blocks_recovery_and_initialization) {
+  char root[256], path[512]; ASSERT_TRUE(asper_test_tmpdir(root)); setup();
+  snprintf(path, sizeof path, "%s/.erase.pending", root);
+  ASSERT_OK(os_write_file(path, "", 0));
+  asper_open_params p = {0}; p.memory_root = root;
+  asper_ctx *c = NULL;
+  ASSERT_ERR(asper_open(&p, &c), ASPER_ERR_BUSY); ASSERT_TRUE(!c);
+  snprintf(path, sizeof path, "%s/manifest.xcdn", root);
+  ASSERT_TRUE(!os_file_exists(path));
+  snprintf(path, sizeof path, "%s/journal.xcdn", root);
+  ASSERT_TRUE(!os_file_exists(path));
+  fake_curator_dispose(&curator); asper_test_rmtree(root);
+}
+
 static asper_err uncertain_commit(int stage) { return stage == 5 ? ASPER_ERR_IO : ASPER_OK; }
 TEST(commit_sync_uncertainty_blocks_the_live_store) {
   char root[256],id[37]; ASSERT_TRUE(asper_test_tmpdir(root)); setup();
@@ -116,6 +130,7 @@ TEST(crash_during_each_compaction_boundary) {
 #endif
 }
 TEST_LIST = {
+  TEST_ENTRY(erasure_guard_blocks_recovery_and_initialization),
   TEST_ENTRY(commit_sync_uncertainty_blocks_the_live_store),
   TEST_ENTRY(snapshot_damage_is_fatal),
   TEST_ENTRY(all_backups_are_checked_before_restore),
