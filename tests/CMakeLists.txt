@@ -122,6 +122,16 @@ if(TARGET asper-mcp)
       ${CMAKE_CURRENT_SOURCE_DIR}/test_curation_admin.py --mcp $<TARGET_FILE:asper-mcp>
       --fixture $<TARGET_FILE:curation_fixture>)
     set_tests_properties(test_curation_admin PROPERTIES TIMEOUT 120)
+    add_executable(deferral_fixture deferral_fixture.c fakes.c)
+    target_include_directories(deferral_fixture PRIVATE ../src ${CMAKE_CURRENT_SOURCE_DIR})
+    target_compile_options(deferral_fixture PRIVATE ${ASPER_C_FLAGS})
+    target_compile_definitions(deferral_fixture PRIVATE ${ASPER_C_DEFS})
+    target_link_libraries(deferral_fixture PRIVATE asper_static)
+    set_target_properties(deferral_fixture PROPERTIES C_STANDARD 99 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF)
+    add_test(NAME test_deferral_admin COMMAND ${Python3_EXECUTABLE}
+      ${CMAKE_CURRENT_SOURCE_DIR}/test_deferral_admin.py --mcp $<TARGET_FILE:asper-mcp>
+      --fixture $<TARGET_FILE:deferral_fixture>)
+    set_tests_properties(test_deferral_admin PROPERTIES TIMEOUT 120)
     add_test(NAME test_store_admin COMMAND ${Python3_EXECUTABLE}
       ${CMAKE_CURRENT_SOURCE_DIR}/test_store_admin.py --mcp $<TARGET_FILE:asper-mcp>)
     set_tests_properties(test_store_admin PROPERTIES TIMEOUT 120)

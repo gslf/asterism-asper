@@ -125,6 +125,7 @@ set(ASPER_SOURCES
   src/source_history.c
   src/source_replay.c
   src/source_pending.c
+  src/source_deferred.c
   src/turn_queue.c
   src/curation_codec.c
   src/curation_input.c

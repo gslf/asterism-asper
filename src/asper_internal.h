@@ -756,6 +756,8 @@ struct asper_ctx {
   size_t turns_n, turns_cap;
   size_t turns_bytes, turns_inflight, turns_inflight_bytes;
   bool source_backlog;          /* durable inputs beyond the admitted FIFO */
+  struct asper_source_deferral *source_deferrals; /* Immutable offline policy. */
+  size_t source_deferred_n;
   size_t turns_dropped;
   asper_time last_turn_at;      /* 0 = none */
   char (*access_batch)[37];

@@ -203,7 +203,9 @@ Recall reports deadline expiry as `ASPER_ERR_TIMEOUT`. Its absolute operation
 deadline becomes a remaining duration after retrieval and prompt construction.
 Shared and embedded model adapters preserve request-local consumption, partial
 output and cancellation. Unsupported model contracts return
-`ASPER_ERR_UNSUPPORTED`. The current public contract is ABI 7.
+`ASPER_ERR_UNSUPPORTED`. The current public contract is ABI 8.
+[Offline source deferral](docs/curation-deferral.md) postpones oversized curation
+inputs without acknowledging or deleting them, with explicit removal on review.
 
 Standalone CI reads its asmodel revision from `dependencies.json`. The coordinated
 Asngn release checker verifies that this dependency matches the four-component

@@ -10,6 +10,7 @@
 #include <string.h>
 
 #include "asper_internal.h"
+#include "source_deferred.h"
 #include "xcdn.h"
 
 /* Defined in worker.c; asper_flush(1) uses them for the cycle slot. */
@@ -535,6 +536,7 @@ static void ctx_destroy(asper_ctx *c, bool store_opened) {
   asper_models_shutdown(c);
   asper_knowledge_close(c);
   asper_source_pending_close(c);
+  free(c->source_deferrals);
   asper_index_free(&c->index);
   if (store_opened) {
     asper_store_close(c);
@@ -664,6 +666,8 @@ static asper_err asper_open_impl(const asper_open_params *p,
   e = asper_store_open(c);
   if (e != ASPER_OK) goto fail;
   store_opened = true;
+  e = asper_source_deferred_load(c, &c->source_deferrals, &c->source_deferred_n);
+  if (e != ASPER_OK) goto fail;
   e = asper_curation_recover(c);
   if (e != ASPER_OK) goto fail;
   e = asper_knowledge_open(c);
@@ -1404,6 +1408,7 @@ asper_err asper_get_stats(asper_ctx *c, asper_stats *out) {
   out->curation_bytes = c->turns_bytes + c->turns_inflight_bytes;
   out->curation_queue_limit = asper_turn_queue_limit(c);
   out->curation_backlog = c->source_backlog;
+  out->curation_deferred = c->source_deferred_n;
   os_mutex_unlock(&c->ev_mu);
   return ASPER_OK;
 }

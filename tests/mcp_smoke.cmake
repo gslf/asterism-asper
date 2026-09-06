@@ -22,7 +22,7 @@ endif()
 foreach(fragment
     "\"supportedVersions\":[\"2026-07-28\",\"2025-06-18\"]"
     "\"protocolVersion\":\"2025-06-18\"" "\"code\":-32022"
-    "curation_queued" "curation_inflight" "curation_bytes" "curation_queue_limit"
+    "curation_deferred" "curation_queued" "curation_inflight" "curation_bytes" "curation_queue_limit"
     "curation_backlog" "curation_suspended"
     "\"resultType\":\"complete\"" "io.modelcontextprotocol/serverInfo")
   string(FIND "${output}" "${fragment}" found)

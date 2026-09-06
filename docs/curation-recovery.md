@@ -80,8 +80,9 @@ prefix before the tail and any newly appended events.
 
 An oversized first event returns `ASPER_ERR_LIMIT` without inference or an
 acknowledgement. It remains at the head of the queue. Raising the token budget
-can admit it within the byte envelope; larger events require an explicit future
-segmentation or defer contract. The runtime never truncates and acknowledges
+can admit it within the byte envelope. [Offline source deferral](curation-deferral.md)
+can explicitly postpone it while later events proceed; segmentation remains open.
+The runtime never truncates and acknowledges
 such an event silently. Full flush drains fitting inputs through multiple bounded
 batches in both threaded and non-threaded builds, stopping on an error.
 Receipts are at most 1 MiB, with at most 64 KiB

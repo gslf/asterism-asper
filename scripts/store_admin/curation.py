@@ -1,24 +1,13 @@
 """Inspect a suspended source batch; acknowledge partial effects without replay."""
-import hashlib
 import json
 import os
 import re
-import stat
 import uuid
-from .files import LOCK, check_owner, identity, inventory, mount_id, opened, write_new
+from .files import LOCK, inventory, write_new
+from .frames import ID, unique, checked_decode, checked_encode, checked_read
 
 PENDING = "curation.pending"
 MAX_RECEIPT = 1024 * 1024
-ID = re.compile(r"[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}\Z")
-
-
-def unique(pairs):
-    result = {}
-    for key, value in pairs:
-        if key in result:
-            raise ValueError("duplicate receipt field")
-        result[key] = value
-    return result
 
 
 def validate(receipt):
@@ -61,48 +50,24 @@ def validate(receipt):
 
 
 def decode(data):
-    header, separator, payload = data.partition(b"\n")
-    fields = header.split(b" ")
-    if (not separator or len(fields) != 10 or fields[:5] != [b"AEV2", b"1", b"0", b"5", b"0"] or
-            not ID.fullmatch(fields[5].decode("ascii")) or fields[6] != b"0" or
-            not payload.endswith(b"\n")):
-        raise ValueError("invalid checked receipt frame")
-    text = payload[:-1]
-    prefix = b" ".join(fields[:8])
-    if (len(text) > MAX_RECEIPT or fields[7] != str(len(text)).encode("ascii") or
-            fields[8] != hashlib.sha256(prefix).hexdigest().encode("ascii") or
-            fields[9] != hashlib.sha256(prefix + text).hexdigest().encode("ascii")):
-        raise ValueError("receipt checksum or length mismatch")
     try:
-        return validate(json.loads(text.decode("utf-8"), object_pairs_hook=unique))
+        return validate(json.loads(checked_decode(data, MAX_RECEIPT), object_pairs_hook=unique))
     except (UnicodeError, RecursionError) as error:
         raise ValueError("invalid receipt text") from error
 
 
 def encode(receipt):
-    validate(receipt)
-    text = json.dumps(receipt, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
-    prefix = f"AEV2 1 0 5 0 {uuid.uuid4()} 0 {len(text)}".encode("ascii")
-    return (prefix + b" " + hashlib.sha256(prefix).hexdigest().encode("ascii") + b" " +
-            hashlib.sha256(prefix + text).hexdigest().encode("ascii") + b"\n" + text + b"\n")
+    text = json.dumps(validate(receipt), ensure_ascii=False, separators=(",", ":"))
+    if len(text.encode("utf-8")) > MAX_RECEIPT:
+        raise ValueError("curation receipt exceeds its limit")
+    return checked_encode(text)
 
 
 def read_pending(root):
-    with opened(PENDING, root) as fd:
-        before = os.fstat(fd)
-        check_owner(before)
-        if (not stat.S_ISREG(before.st_mode) or before.st_nlink != 1 or
-                before.st_size > MAX_RECEIPT + 512 or mount_id(fd) != mount_id(root)):
-            raise ValueError("invalid or oversized curation receipt file")
-        data = bytearray()
-        while block := os.read(fd, min(65536, MAX_RECEIPT + 513 - len(data))):
-            data.extend(block)
-            if len(data) > MAX_RECEIPT + 512:
-                raise ValueError("curation receipt grew past its limit")
-        if (identity(os.fstat(fd)) != identity(before) or len(data) != before.st_size or
-                identity(os.stat(PENDING, dir_fd=root, follow_symlinks=False)) != identity(before)):
-            raise ValueError("curation receipt changed")
-        return decode(bytes(data))
+    try:
+        return validate(json.loads(checked_read(root, PENDING, MAX_RECEIPT), object_pairs_hook=unique))
+    except (UnicodeError, RecursionError) as error:
+        raise ValueError("invalid receipt text") from error
 
 
 def inspect_curation(root):

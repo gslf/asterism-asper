@@ -1,5 +1,6 @@
 /* Progressive curation admission. Disk remains the source of truth on restart. */
 #include "source_internal.h"
+#include "source_deferred.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -110,7 +111,12 @@ static asper_err fill_scope(asper_ctx *c, pending_scope *s) {
     if (e == ASPER_OK && (event.kind == ASPER_EVENT_USER || event.kind == ASPER_EVENT_ASSISTANT) &&
         !asper_source_curated_has(p->curated, p->curated_n, event.id)) {
       e = asper_source_view_read(&view, s->cursor + 1, &event);
-      if (e == ASPER_OK) {
+      const asper_source_deferral *deferred = asper_source_deferred_find(
+          c->source_deferrals,c->source_deferred_n,s->scope,event.id);
+      if (e == ASPER_OK && deferred) {
+        if (!asper_source_deferred_matches(deferred,&event)) e = asper_seterr(c,
+            ASPER_ERR_PARSE,"deferred source %s changed; inspect its offline decision",event.id);
+      } else if (e == ASPER_OK) {
         e = asper_enqueue_turn(c,
           event.kind == ASPER_EVENT_USER ? ASPER_ROLE_USER : ASPER_ROLE_ASSISTANT,
           event.text, (asper_time)event.at, event.id, s->scope, event.object_ref);

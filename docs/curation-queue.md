@@ -34,8 +34,9 @@ Appends during that drain stay outside the captured endpoints, including events
 in new scopes; another flush or background cycle can admit them afterward. This
 prevents concurrent producers from extending a requested drain indefinitely.
 An event that cannot fit the [transcript envelope](curation-recovery.md) still
-stops with `ASPER_ERR_LIMIT`; it is neither truncated nor acknowledged. Segmentation
-and operator-directed deferral remain future work.
+stops with `ASPER_ERR_LIMIT`; it is neither truncated nor acknowledged.
+[Offline deferral](curation-deferral.md) can postpone that exact event explicitly
+and allow later inputs to proceed. Segmentation remains future work.
 
 The payload cap is not a whole-process RSS limit. Temporary frame decoding,
 source-object metadata parsing, rendered prompts, source indices, model state and
@@ -56,6 +57,7 @@ ABI 7 adds queue observations to `asper_get_stats` and MCP `memory_stats`:
 | `curation_queue_limit` | Effective event-count limit |
 | `curation_backlog` | Durable data may still need admission; not an exact pending count |
 | `curation_suspended` | A receipt is currently pending, including transient completion work |
+| `curation_deferred` | Installed offline postponements, separate from acknowledgement (ABI 8) |
 
 Stats are observations under short locks, not an atomic snapshot of model and
 store state. A suspended receipt after restart requires the existing recovery

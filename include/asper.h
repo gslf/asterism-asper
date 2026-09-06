@@ -28,8 +28,8 @@ extern "C" {
 #endif
 
 #define ASPER_VERSION_MAJOR 0
-#define ASPER_VERSION_MINOR 7
-#define ASPER_ABI_VERSION 7
+#define ASPER_VERSION_MINOR 8
+#define ASPER_ABI_VERSION 8
 #define ASPER_VERSION_PATCH 0
 
 /* Returns "major.minor.patch". */
@@ -396,6 +396,7 @@ typedef struct {
   size_t curation_queue_limit;  /* queued + in-flight events; bytes capped at 32 MiB */
   int curation_backlog;         /* more durable data may need admission; not a count */
   int curation_suspended;       /* receipt pending; inspect after an interruption */
+  size_t curation_deferred;     /* explicit offline postponements, never acknowledgements */
 } asper_stats;
 asper_err asper_get_stats(asper_ctx *c, asper_stats *out);
 

@@ -8,14 +8,23 @@ from store_admin.archive import export_store, verify_export
 from store_admin.erase import erase_store, inspect_store
 from store_admin.locking import store
 from store_admin.curation import acknowledge, inspect_curation
+from store_admin import deferral
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
-    for name in ("inspect", "export", "erase", "curation-inspect", "curation-acknowledge"):
+    for name in ("inspect", "export", "erase", "curation-inspect", "curation-acknowledge",
+                 "curation-sources", "curation-defer", "curation-resume-source"):
         command = commands.add_parser(name)
         command.add_argument("--root", required=True, type=Path)
+        if name in ("curation-sources", "curation-defer", "curation-resume-source"):
+            command.add_argument("--scope", required=name != "curation-sources")
+            command.add_argument("--event", required=name != "curation-sources")
+            if name != "curation-sources":
+                command.add_argument("--expect-snapshot", required=True)
+            if name == "curation-defer":
+                command.add_argument("--note", required=True)
         if name == "export":
             command.add_argument("--output", required=True, type=Path)
         elif name == "erase":
@@ -42,6 +51,13 @@ def main():
                     result = inspect_curation(root)
                 elif args.command == "curation-acknowledge":
                     result = acknowledge(root, args.expect_snapshot, args.note)
+                elif args.command == "curation-sources":
+                    if (args.scope is None) != (args.event is None):
+                        raise ValueError("scope and event must be supplied together")
+                    result = deferral.inspect(root, args.scope, args.event)
+                elif args.command in ("curation-defer", "curation-resume-source"):
+                    result = deferral.update(root, args.expect_snapshot, args.scope, args.event,
+                        getattr(args, "note", None), resume=args.command == "curation-resume-source")
                 else:
                     result = erase_store(root, args.expect_snapshot)
     except (OSError, ValueError) as error:
