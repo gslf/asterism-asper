@@ -5,6 +5,9 @@ It uses Python 3.11+ and the standard library, with no model, server or network
 dependency. This implementation requires Linux with `/proc/self/fdinfo`; other
 platforms fail explicitly. The core library does not require Python.
 
+It also provides [source-curation inspection and acknowledgement](curation-recovery.md).
+That operation keeps reviewed partial effects and never replays model proposals.
+
 Stop every host using the store first. Maintenance acquires the same nonblocking
 writer lock as libasper and refuses a live store. Run it as the store's OS owner:
 the root and entries must belong to the effective UID and must not be writable

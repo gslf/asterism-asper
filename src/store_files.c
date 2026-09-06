@@ -3,20 +3,26 @@
 #include "store_files.h"
 #include "event_log.h"
 #include <stdlib.h>
-#include <errno.h>
 #include <string.h>
+
+static FILE *temporary_file(const char *path, char **out) {
+  size_t n = strlen(path);
+  char id[37]; asper_uuid_v4(id);
+  *out = malloc(n + 42);
+  if (!*out) return NULL;
+  snprintf(*out, n + 42, "%s.tmp-%s", path, id);
+  return os_blob_create(*out);
+}
 
 asper_err asper_store_file_read(const char *path, bool checked, size_t limit,
                                char **out, size_t *size) {
   if (!path || !out || limit > ASPER_STORE_FILE_MAX) return ASPER_ERR_INVALID;
   *out = NULL;
   if (size) *size = 0;
-  FILE *f = os_fopen(path,"rb");
-  if (!f) return errno == ENOENT ? ASPER_ERR_NOT_FOUND : ASPER_ERR_IO;
-  asper_err e = ASPER_OK;
-  long n;
-  if (fseek(f,0,SEEK_END) || (n = ftell(f)) < 0 || fseek(f,0,SEEK_SET)) e = ASPER_ERR_IO;
-  else if ((uint64_t)n > limit + (checked ? 512u : 0u)) e = ASPER_ERR_LIMIT;
+  FILE *f = NULL; uint64_t n = 0;
+  asper_err e = os_blob_open(path, &f, &n);
+  if (e != ASPER_OK) return e;
+  if (n > limit + (checked ? 512u : 0u)) e = ASPER_ERR_LIMIT;
   if (e == ASPER_OK && checked) {
     asper_event event;
     e = asper_event_frame_read(f,&event);
@@ -42,12 +48,9 @@ asper_err asper_store_file_write(asper_ctx *c, const char *path, const char *dat
   if (!path || !data) return ASPER_ERR_INVALID;
   if (size > (checked ? ASPER_SECTION_MAX : ASPER_STORE_FILE_MAX)) return ASPER_ERR_LIMIT;
   if (checked && (memchr(data,0,size) || strlen(data) != size)) return ASPER_ERR_INVALID;
-  size_t n = strlen(path);
-  char *tmp = malloc(n+5);
-  if (!tmp) return ASPER_ERR_NOMEM;
-  memcpy(tmp,path,n); memcpy(tmp+n,".tmp",5);
-  FILE *f = os_fopen(tmp,"wb");
-  asper_err e = f ? ASPER_OK : ASPER_ERR_IO;
+  char *tmp = NULL;
+  FILE *f = temporary_file(path, &tmp);
+  asper_err e = f ? ASPER_OK : tmp ? ASPER_ERR_IO : ASPER_ERR_NOMEM;
   if (f) {
     if (checked) {
       asper_event event = {0}; event.sequence = 1; event.kind = ASPER_EVENT_DIAGNOSTIC;
@@ -59,7 +62,7 @@ asper_err asper_store_file_write(asper_ctx *c, const char *path, const char *dat
   }
   if (e == ASPER_OK) e = os_file_replace(tmp,path);
   if (e != ASPER_OK) {
-    (void)os_remove_file(tmp);
+    if (f) (void)os_remove_file(tmp); /* Only remove a file this call created. */
     if (c) asper_seterr(c,e,"store: cannot persist %s",path);
   }
   free(tmp); return e;
@@ -69,15 +72,16 @@ asper_err asper_store_file_write(asper_ctx *c, const char *path, const char *dat
  * The destination becomes visible only after the complete source hash matches. */
 asper_err asper_store_file_copy(const char *src, const char *dst,
                                const char *expected, char out_hash[65]) {
-  FILE *in = os_fopen(src,"rb"), *out = NULL;
-  if (!in) return errno == ENOENT ? ASPER_ERR_NOT_FOUND : ASPER_ERR_IO;
+  FILE *in = NULL, *out = NULL; uint64_t size = 0;
+  asper_err e = os_blob_open(src, &in, &size);
+  if (e != ASPER_OK) return e;
   char *tmp = NULL, buffer[16384], hash[65];
   uint8_t bytes[32]; asper_sha256_ctx digest; asper_sha256_init(&digest);
-  asper_err e = ASPER_OK; size_t total = 0, count;
-  if (dst) {
-    size_t n = strlen(dst); tmp = malloc(n+5);
-    if (!tmp) e = ASPER_ERR_NOMEM;
-    else { memcpy(tmp,dst,n); memcpy(tmp+n,".tmp",5); out = os_fopen(tmp,"wb"); if (!out) e = ASPER_ERR_IO; }
+  size_t total = 0, count;
+  if (size > ASPER_STORE_FILE_MAX) e = ASPER_ERR_LIMIT;
+  if (dst && e == ASPER_OK) {
+    out = temporary_file(dst, &tmp);
+    if (!out) e = tmp ? ASPER_ERR_IO : ASPER_ERR_NOMEM;
   }
   while (e == ASPER_OK && (count = fread(buffer,1,sizeof buffer,in)) > 0) {
     if (count > ASPER_STORE_FILE_MAX-total) { e = ASPER_ERR_LIMIT; break; }
@@ -94,7 +98,7 @@ asper_err asper_store_file_copy(const char *src, const char *dst,
     if (fclose(out) && e == ASPER_OK) e = ASPER_ERR_IO;
   }
   if (e == ASPER_OK && dst) e = os_file_replace(tmp,dst);
-  if (e != ASPER_OK && tmp) (void)os_remove_file(tmp);
+  if (e != ASPER_OK && out) (void)os_remove_file(tmp);
   if (e == ASPER_OK && out_hash) strcpy(out_hash,hash);
   free(tmp); return e;
 }

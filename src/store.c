@@ -5,6 +5,7 @@
 #include "asper_internal.h"
 #include "xcdn.h"
 #include "store_files.h"
+#include "asmodel_json.h"
 
 /* ═══════════════════════ records ═══════════════════════ */
 
@@ -161,6 +162,7 @@ void asper_store_close(asper_ctx *c) {
     st->audit_fp = NULL;
   }
   asper_table_free(&st->table);
+  asmodel_json_free(st->curation_receipt); st->curation_receipt = NULL;
   for (size_t i = 0; i < st->projects_n; i++) free(st->projects[i]);
   free(st->projects);
   st->projects = NULL;

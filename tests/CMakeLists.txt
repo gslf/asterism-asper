@@ -35,6 +35,7 @@ set(ASPER_TEST_PROGRAMS
   test_index
   test_inject_golden
   test_curator_cycles
+  test_curation_receipts
   test_review_recall
   test_config
   test_json
@@ -49,6 +50,12 @@ add_executable(bench_source_context EXCLUDE_FROM_ALL bench_source_context.c)
 target_link_libraries(bench_source_context PRIVATE asper_static)
 target_compile_options(bench_source_context PRIVATE ${ASPER_C_FLAGS})
 set_target_properties(bench_source_context PROPERTIES C_STANDARD 99 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF)
+add_executable(curation_replay_probe EXCLUDE_FROM_ALL curation_replay_probe.c fakes.c)
+target_include_directories(curation_replay_probe PRIVATE ../src ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(curation_replay_probe PRIVATE ${ASPER_C_DEFS})
+target_compile_options(curation_replay_probe PRIVATE ${ASPER_C_FLAGS})
+target_link_libraries(curation_replay_probe PRIVATE asper_static)
+set_target_properties(curation_replay_probe PROPERTIES C_STANDARD 99 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF)
 
 foreach(test_name IN LISTS ASPER_TEST_PROGRAMS)
   set(test_sources ${test_name}.c fakes.c)
@@ -103,6 +110,16 @@ if(TARGET asper-mcp)
   set_tests_properties(test_mcp_protocol PROPERTIES TIMEOUT 60)
   if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     find_package(Python3 3.11 REQUIRED COMPONENTS Interpreter)
+    add_executable(curation_fixture curation_fixture.c fakes.c)
+    target_include_directories(curation_fixture PRIVATE ../src ${CMAKE_CURRENT_SOURCE_DIR})
+    target_compile_options(curation_fixture PRIVATE ${ASPER_C_FLAGS})
+    target_compile_definitions(curation_fixture PRIVATE ${ASPER_C_DEFS})
+    target_link_libraries(curation_fixture PRIVATE asper_static)
+    set_target_properties(curation_fixture PROPERTIES C_STANDARD 99 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF)
+    add_test(NAME test_curation_admin COMMAND ${Python3_EXECUTABLE}
+      ${CMAKE_CURRENT_SOURCE_DIR}/test_curation_admin.py --mcp $<TARGET_FILE:asper-mcp>
+      --fixture $<TARGET_FILE:curation_fixture>)
+    set_tests_properties(test_curation_admin PROPERTIES TIMEOUT 120)
     add_test(NAME test_store_admin COMMAND ${Python3_EXECUTABLE}
       ${CMAKE_CURRENT_SOURCE_DIR}/test_store_admin.py --mcp $<TARGET_FILE:asper-mcp>)
     set_tests_properties(test_store_admin PROPERTIES TIMEOUT 120)

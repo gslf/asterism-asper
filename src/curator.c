@@ -19,6 +19,7 @@
 #include <string.h>
 
 #include "asper_internal.h"
+#include "curation_receipt.h"
 
 #define CURATOR_RELATED_PER_TURN 3
 #define CURATOR_RELATED_CAP 12
@@ -104,6 +105,7 @@ static asper_err take_turns(asper_ctx *c, bool force, asper_turn **out,
   size_t take = c->turns_n;
   if (!force && c->cfg.turn_batch > 0 && take > (size_t)c->cfg.turn_batch)
     take = (size_t)c->cfg.turn_batch;
+  if (take > CURATION_BATCH_MAX) take = CURATION_BATCH_MAX;
   if (take == 0) {
     os_mutex_unlock(&c->ev_mu);
     return ASPER_OK;
@@ -698,24 +700,24 @@ static cycle_op_result cycle_do_mutate(asper_ctx *c, const asper_cop *cop,
 
 /* ---- batch epilogue ------------------------------------------------------ */
 
-static void cycle_epilogue(asper_ctx *c)
+static asper_err cycle_epilogue(asper_ctx *c)
 {
   asper_err rc = asper_access_flush(c);
   if (rc != ASPER_OK)
     asper_log(c, ASPER_LOG_WARN, "curator", "access flush failed (%s)",
               asper_err_name(rc));
-  if (c->cfg.journal_sync == ASPER_SYNC_BATCH) {
-    rc = asper_journal_sync(c);
-    if (rc != ASPER_OK)
-      asper_log(c, ASPER_LOG_WARN, "curator", "journal sync failed (%s)",
-                asper_err_name(rc));
-  }
+  /* A receipt must never acknowledge source events ahead of durable effects,
+   * including when the configured general journal policy is less strict. */
+  asper_err sync = asper_journal_sync(c);
+  return rc != ASPER_OK ? rc : sync;
 }
 
 /* ---- curation cycle ------------------------------------------------------- */
 
 asper_err asper_curation_cycle(asper_ctx *c, bool force)
 {
+  asper_err guard = asper_curation_guard(c);
+  if (guard != ASPER_OK) return guard;
   int64_t t0 = os_monotonic_ms();
   asper_time now = asper_clock_now(&c->clock);
 
@@ -746,7 +748,7 @@ asper_err asper_curation_cycle(asper_ctx *c, bool force)
   asper_cop *cops = NULL;
   size_t n_cops = 0, bad = 0;
 
-  rc = asper_source_curated_admit(c, n_turns);
+  rc = asper_curation_admit(c, n_turns);
   if (rc != ASPER_OK) goto fail;
   project=turns[0].project[0] ? asper_strdup(turns[0].project) : NULL;
   if (turns[0].project[0] && !project) { rc=ASPER_ERR_NOMEM;goto fail; }
@@ -784,6 +786,9 @@ asper_err asper_curation_cycle(asper_ctx *c, bool force)
     asper_seterr(c, rc, "curation cycle: out of memory");
     goto out;
   }
+
+  rc = asper_curation_begin(c, turns, n_turns, handles, n_handles, reply);
+  if (rc != ASPER_OK) goto out;
 
   {
     /* Local tallies feed the INFO summary line only; stats.ops_rejected is
@@ -832,18 +837,16 @@ asper_err asper_curation_cycle(asper_ctx *c, bool force)
         rejected++;
       else
         pending++;
+      rc = asper_curation_checkpoint(c, 2);
+      if (rc != ASPER_OK) break;
     }
     free(seen);
     (void)pending; /* visible via its own INFO lines */
 
-    cycle_epilogue(c);
-    {
-      asper_err ack = asper_source_mark_curated(c, turns, n_turns);
-      if (ack != ASPER_OK)
-        asper_log(c, ASPER_LOG_WARN, "source",
-                  "curation acknowledgement failed (%s); retry after restart may "
-                  "propose changes to records already updated by this cycle", asper_err_name(ack));
-    }
+    if (rc == ASPER_OK) rc = cycle_epilogue(c);
+    if (rc == ASPER_OK) rc = asper_curation_checkpoint(c, 3);
+    if (rc == ASPER_OK) rc = asper_curation_finish(c, applied, rejected, pending);
+    if (rc != ASPER_OK) goto out;
 
     size_t cycle_no;
     os_rwlock_wrlock(&c->lock);
@@ -974,6 +977,8 @@ static asper_err build_review_prompt(asper_record *const *cands, size_t n,
 
 asper_err asper_maintenance_review(asper_ctx *c, bool force)
 {
+  asper_err guard = asper_curation_guard(c);
+  if (guard != ASPER_OK) return guard;
   int64_t t0 = os_monotonic_ms();
   asper_time now = asper_clock_now(&c->clock);
 
@@ -1088,7 +1093,8 @@ asper_err asper_maintenance_review(asper_ctx *c, bool force)
         rejected++;
     }
 
-    cycle_epilogue(c);
+    rc = cycle_epilogue(c);
+    if (rc != ASPER_OK) goto out;
 
     asper_log(c, ASPER_LOG_INFO, "curator",
               "review: applied=%zu rejected=%zu (%.1fs)", applied, rejected,

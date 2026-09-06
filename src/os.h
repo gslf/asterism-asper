@@ -54,6 +54,7 @@
 #define os_store_lock         asper_x_store_lock
 #define os_directory_canonical asper_x_directory_canonical
 #define os_blob_open          asper_x_blob_open
+#define os_blob_create        asper_x_blob_create
 #define os_stream_stamp       asper_x_stream_stamp
 #define os_fopen              asper_x_fopen
 #define os_now_unix           asper_x_now_unix
@@ -155,6 +156,8 @@ asper_err os_list_dir(const char *path, char ***out_names, size_t *out_n);
 /* Close to release; keep the lock file linked while the store exists. */
 FILE *os_store_lock(const char *path);
 FILE     *os_fopen(const char *path, const char *mode);
+/* Create a new private regular file; never truncate an existing leaf/alias. */
+FILE *os_blob_create(const char *path);
 
 /* Open a regular read stream; reject aliases and special files. Caller closes it. */
 asper_err os_blob_open(const char *path, FILE **out, uint64_t *size);

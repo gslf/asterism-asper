@@ -373,6 +373,8 @@ typedef struct {
   size_t journal_ops;      /* ops in journal since last compaction */
   FILE *journal_fp;        /* append stream, owned */
   bool poisoned;          /* Uncertain persistence requires reopen. */
+  struct asmodel_json_value *curation_receipt; /* Guarded by c->lock; prevents compaction/re-proposal. */
+  asper_err (*curation_checkpoint)(int stage); /* Private receipt fault/crash probe. */
   asper_err (*compact_checkpoint)(int stage); /* Private fault/crash probe, normally NULL. */
   int journal_fault;      /* Private one-shot I/O fault injection: 1=write, 2=flush, 3=sync. */
   FILE *audit_fp;          /* NULL unless cfg.audit_log */
@@ -640,6 +642,7 @@ asper_err asper_enqueue_turn(asper_ctx *c, asper_role role,
 /* Rebuild the semantic-curation FIFO from durable source events not yet
  * acknowledged by a successful cycle, and acknowledge one completed batch. */
 asper_err asper_source_replay_pending(asper_ctx *c);
+asper_err asper_curation_recover(asper_ctx *c);
 asper_err asper_source_curated_admit(asper_ctx *c, size_t n);
 asper_err asper_source_mark_curated(asper_ctx *c,
                                     const asper_turn *turns, size_t n);

@@ -1,5 +1,6 @@
 /* Recover uncurated exact events without replaying tool effects. */
 #include "source_internal.h"
+#include "store_files.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -57,30 +58,39 @@ asper_err asper_source_curated_admit(asper_ctx *c, size_t n) {
   os_mutex_unlock(&c->source_mu); free(path); return e;
 }
 
-asper_err asper_source_mark_curated(asper_ctx *c,
-                                    const asper_turn *turns, size_t n) {
-  char *path;
-  FILE *f = NULL;
-  asper_err e = ASPER_OK;
-  if (!c || (!turns && n)) return ASPER_ERR_INVALID;
-  if (n > ASPER_CURATED_BYTES / 37) return ASPER_ERR_LIMIT;
+/* Replace the bounded acknowledgement set atomically. A retained completion
+ * receipt makes a repeated acknowledgement harmless, even at the quota. */
+asper_err asper_source_mark_curated(asper_ctx *c, const asper_turn *turns, size_t n) {
+  if (!c || (!turns && n) || n > ASPER_CURATED_BYTES / 37) return ASPER_ERR_INVALID;
   for (size_t i = 0; i < n; i++) if (!asper_uuid_valid(turns[i].source_id)) return ASPER_ERR_INVALID;
-  path = os_path_join(c->store.root, "curated-events.log");
+  char *path = os_path_join(c->store.root, "curated-events.log"), *data = NULL;
   if (!path) return ASPER_ERR_NOMEM;
+  char (*ids)[37] = NULL; size_t bytes = 0, count = 0;
+  asper_buf output; asper_buf_init(&output);
   os_mutex_lock(&c->source_mu);
-  e = curated_space(path, n);
-  if (e != ASPER_OK) { os_mutex_unlock(&c->source_mu); free(path); return e; }
-  f = os_fopen(path, "ab");
-  if (!f) e = ASPER_ERR_IO;
-  for (size_t i = 0; e == ASPER_OK && i < n; i++)
-    if (fprintf(f, "%s\n", turns[i].source_id) < 0)
-      e = ASPER_ERR_IO;
-  if (e == ASPER_OK && (fflush(f) != 0 || os_fsync(f) != ASPER_OK))
-    e = ASPER_ERR_IO;
-  if (f && fclose(f) != 0 && e == ASPER_OK) e = ASPER_ERR_IO;
+  asper_err e = asper_source_text_read(path, ASPER_CURATED_BYTES, &data, &bytes);
+  if (e == ASPER_ERR_NOT_FOUND) e = ASPER_OK;
+  if (e == ASPER_OK) e = curated_ids_parse(data, bytes, &ids, &count);
+  free(data);
+  if (e == ASPER_OK && n) {
+    char (*grown)[37] = realloc(ids, (count + n) * sizeof *ids);
+    if (!grown) e = ASPER_ERR_NOMEM;
+    else {
+      ids = grown;
+      for (size_t i = 0; i < n; i++) memcpy(ids[count++], turns[i].source_id, 37);
+    }
+  }
+  if (e == ASPER_OK) {
+    if (count) qsort(ids, count, sizeof *ids, source_id_cmp);
+    for (size_t i = 0; e == ASPER_OK && i < count; i++) {
+      if (i && !strcmp(ids[i-1], ids[i])) continue;
+      if (output.len > ASPER_CURATED_BYTES - 37) e = ASPER_ERR_LIMIT;
+      else e = asper_buf_printf(&output, "%s\n", ids[i]);
+    }
+    if (e == ASPER_OK) e = asper_store_file_write(c, path, output.data ? output.data : "", output.len, false);
+  }
   os_mutex_unlock(&c->source_mu);
-  free(path);
-  return e;
+  asper_buf_free(&output); free(ids); free(path); return e;
 }
 
 /* The pending queue still owns its accepted turns; this reader avoids a
@@ -115,6 +125,8 @@ asper_err asper_source_replay_pending(asper_ctx *c) {
   size_t curated_n = 0;
   asper_err e;
   if (!c) return ASPER_ERR_INVALID;
+  /* Preserve the source on disk while the operator reviews partial effects. */
+  if (c->store.curation_receipt) return ASPER_OK;
   scopes_dir = asper_source_dir(c, "scopes");
   if (!scopes_dir) return ASPER_ERR_IO;
   index_path = os_path_join(scopes_dir, "index.log");

@@ -29,9 +29,10 @@ asper_err asper_store_compact(asper_ctx *c) {
 
   os_rwlock_wrlock(&c->lock);
   os_mutex_lock(&c->journal_mu);
-  if (st->poisoned) {
+  if (st->poisoned || st->curation_receipt) {
+    asper_err unavailable = st->poisoned ? ASPER_ERR_IO : ASPER_ERR_BUSY;
     os_mutex_unlock(&c->journal_mu); os_rwlock_wrunlock(&c->lock);
-    return ASPER_ERR_IO;
+    return unavailable;
   }
   now = asper_clock_now(&c->clock);
   journal_ops_before = st->journal_ops;

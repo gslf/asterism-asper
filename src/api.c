@@ -661,6 +661,8 @@ static asper_err asper_open_impl(const asper_open_params *p,
   e = asper_store_open(c);
   if (e != ASPER_OK) goto fail;
   store_opened = true;
+  e = asper_curation_recover(c);
+  if (e != ASPER_OK) goto fail;
   e = asper_knowledge_open(c);
   if (e != ASPER_OK) goto fail;
 
@@ -1432,24 +1434,7 @@ asper_err asper_flush(asper_ctx *c, int full) {
     return first;
   }
 
-  if (c->no_threads) return asper_run_due_work(c, true, true);
-
-  if (c->has_curator) {
-    asper_cycle_slot_acquire(c);
-    first = asper_curation_cycle(c, true); /* all queued turns */
-    e = asper_maintenance_review(c, true);
-    if (first == ASPER_OK) first = e;
-    asper_cycle_slot_release(c);
-  }
-  e = asper_access_flush(c);
-  if (first == ASPER_OK) first = e;
-  e = asper_store_compact(c);
-  if (first == ASPER_OK) first = e;
-  if (c->has_embedder && asper_cache_needs_save(c)) {
-    e = asper_cache_save(c);
-    if (e != ASPER_OK && first == ASPER_OK) first = e;
-  }
-  return first;
+  return asper_run_due_work(c, true, true);
 }
 
 asper_err asper_get_stats(asper_ctx *c, asper_stats *out) {

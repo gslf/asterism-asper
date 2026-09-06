@@ -8,8 +8,9 @@ Identity is the first layer when its records remain eligible. The store uses ins
 
 Exact scoped events are the source of truth. Asper also owns atomic working
 checkpoints and content-addressed objects for large payloads. Semantic records
-are bounded derivatives with source-event UUID provenance; unfinished curation
-is replayed after restart, so compaction saves context tokens without deleting
+are bounded derivatives with source-event UUID provenance. Unprocessed inputs
+are recovered after restart; interrupted mutation batches require reconciliation.
+Compaction saves context tokens without deleting
 information.
 
 Full specification: [docs/SPECS.md](docs/SPECS.md).
@@ -192,6 +193,9 @@ only the requested slice, with an explicit 64 MiB object bound and hashing cost.
 [Progressive history](docs/source-context.md) selects old pins and recent events
 from an indexed prefix without retaining the complete scope's payloads. Context
 has independent byte/event limits and verifies every selected source frame.
+[Curation receipts](docs/curation-recovery.md) suspend uncertain mutation batches
+instead of proposing them again. Completed receipts reconcile history and source
+acknowledgements on restart; offline operator review preserves partial outcomes.
 
 Recall reports deadline expiry as `ASPER_ERR_TIMEOUT`. Its absolute operation
 deadline becomes a remaining duration after retrieval and prompt construction.

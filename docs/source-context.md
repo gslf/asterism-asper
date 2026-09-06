@@ -57,13 +57,13 @@ and incomplete curated IDs are rejected. Pin overlays retain their last update;
 duplicate curated IDs are coalesced in the in-memory lookup. These logs remain
 separate from checked record transactions and are not a global lifetime quota.
 
-Curation checks acknowledgement capacity before retrieval, embedding or generation,
-then checks again before appending the acknowledgement. A full log preserves the
-pending turn and returns `LIMIT` without inference. An I/O failure after record
-updates can still leave an uncertain acknowledgement: those updates and the
-acknowledgement are not one atomic transaction. Re-proposal after restart may
-encounter already updated records. Atomic curation receipts, selective retention
-and cross-store erasure remain separate work.
+Curation checks acknowledgement and receipt-history capacity before retrieval,
+embedding or generation. A full log preserves the pending turn and returns
+`LIMIT` without inference. [Curation receipts](curation-recovery.md) now distinguish
+completed bookkeeping from interrupted mutations: a completed receipt reconciles
+without a model, while a prepared receipt suspends re-proposal for operator review.
+Individual record updates remain separate transactions. Selective retention and
+cross-store erasure remain separate work.
 
 ## Reproducible component probe
 

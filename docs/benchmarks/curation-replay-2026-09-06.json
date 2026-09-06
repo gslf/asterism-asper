@@ -1,0 +1,27 @@
+{
+  "schema": 1,
+  "baseline_revision": "5018d7d0ab76b8567fcfa97f91872405a934e6e3",
+  "method": "Same probe exits during the third post-generation embedding, after the first journaled insertion. Fresh process opens that store and requests a full flush. Fake providers only.",
+  "variants": {
+    "before": {
+      "binary_sha256": "292ab39bdbdb303b38ab6131d67c205d66021862776e667403db40c1e8e7663e",
+      "interrupted_exit": 82,
+      "resumed": {
+        "requeued_sources": 2,
+        "curator_calls": 1,
+        "flush": "ASPER_OK",
+        "records": 1
+      }
+    },
+    "after": {
+      "binary_sha256": "43c61e57d90aa3b2b0037e6caad0a8681a10c60b93179cb61db9f5f2d8cda627",
+      "interrupted_exit": 82,
+      "resumed": {
+        "requeued_sources": 0,
+        "curator_calls": 0,
+        "flush": "ASPER_ERR_BUSY",
+        "records": 1
+      }
+    }
+  }
+}

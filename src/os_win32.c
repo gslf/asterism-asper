@@ -494,6 +494,20 @@ FILE *os_store_lock(const char *path) {
     return f;
 }
 
+FILE *os_blob_create(const char *path) {
+    wchar_t *wide = os_u8_to_wide(path);
+    if (!wide) return NULL;
+    HANDLE handle = CreateFileW(wide, GENERIC_WRITE, 0, NULL, CREATE_NEW,
+                                FILE_ATTRIBUTE_NORMAL, NULL);
+    free(wide);
+    if (handle == INVALID_HANDLE_VALUE) return NULL;
+    int fd = _open_osfhandle((intptr_t)handle, _O_WRONLY | _O_BINARY);
+    if (fd < 0) { CloseHandle(handle); return NULL; }
+    FILE *stream = _fdopen(fd, "wb");
+    if (!stream) _close(fd);
+    return stream;
+}
+
 FILE *os_fopen(const char *path, const char *mode)
 {
     wchar_t *wp;

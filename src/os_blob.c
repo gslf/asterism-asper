@@ -31,7 +31,7 @@ asper_err os_directory_canonical(const char *path, char **out) {
   *out = resolved; return ASPER_OK;
 }
 
-asper_err os_blob_open(const char *path, FILE **out, uint64_t *size) {
+static asper_err blob_open(const char *path, FILE **out, uint64_t *size, int create) {
   *out = NULL; *size = 0;
   if (!path || !*path) return ASPER_ERR_INVALID;
   char *parts = strdup(path), *state = NULL;
@@ -41,7 +41,8 @@ asper_err os_blob_open(const char *path, FILE **out, uint64_t *size) {
   char *part = strtok_r(parts, "/", &state);
   while (e == ASPER_OK && part) {
     char *next = strtok_r(NULL, "/", &state);
-    int opened = openat(fd, part, O_RDONLY | O_NOFOLLOW | O_CLOEXEC | O_NONBLOCK | (next ? O_DIRECTORY : 0));
+    int mode = create && !next ? O_WRONLY | O_CREAT | O_EXCL : O_RDONLY;
+    int opened = openat(fd, part, mode | O_NOFOLLOW | O_CLOEXEC | O_NONBLOCK | (next ? O_DIRECTORY : 0), 0600);
     if (opened < 0) e = errno == ENOENT ? ASPER_ERR_NOT_FOUND : ASPER_ERR_INVALID;
     else { close(fd); fd = opened; }
     part = next;
@@ -53,7 +54,7 @@ asper_err os_blob_open(const char *path, FILE **out, uint64_t *size) {
     else if (!S_ISREG(st.st_mode) || st.st_size < 0) e = ASPER_ERR_INVALID;
     else {
       *size = (uint64_t)st.st_size;
-      *out = fdopen(fd, "rb");
+      *out = fdopen(fd, create ? "wb" : "rb");
       if (*out) fd = -1;
       else e = ASPER_ERR_IO;
     }
@@ -61,6 +62,13 @@ asper_err os_blob_open(const char *path, FILE **out, uint64_t *size) {
   if (fd >= 0) close(fd);
   if (e != ASPER_OK) *size = 0;
   return e;
+}
+asper_err os_blob_open(const char *path, FILE **out, uint64_t *size) {
+  return blob_open(path, out, size, 0);
+}
+FILE *os_blob_create(const char *path) {
+  FILE *out = NULL; uint64_t size;
+  (void)blob_open(path, &out, &size, 1); return out;
 }
 #else
 static wchar_t *dos_name(wchar_t *path) {
