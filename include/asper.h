@@ -28,8 +28,8 @@ extern "C" {
 #endif
 
 #define ASPER_VERSION_MAJOR 0
-#define ASPER_VERSION_MINOR 6
-#define ASPER_ABI_VERSION 6
+#define ASPER_VERSION_MINOR 7
+#define ASPER_ABI_VERSION 7
 #define ASPER_VERSION_PATCH 0
 
 /* Returns "major.minor.patch". */
@@ -88,7 +88,8 @@ typedef struct {
   const char *scope;
   asper_event_kind kind;
   const char *text;       /* UTF-8; copied and persisted before return */
-  const char *object_ref; /* optional sha256:<hex> source object */
+  const char *object_ref; /* optional sha256:<hex> source object; for user/assistant
+                          * events without one, runtime captures the active project */
   int pinned;
 } asper_event_input;
 
@@ -376,7 +377,9 @@ asper_err asper_memory_list(asper_ctx *c, asper_section s,
 
 /* ---- lifecycle / maintenance ------------------------------------------- */
 
-/* full != 0: run pending curation + maintenance review + compaction.
+/* full != 0: capture and drain current pending source prefixes, then run
+ * maintenance review + compaction. Concurrent appends belong to a later flush.
+ * An input that cannot fit the transcript budget stops the drain with LIMIT.
  * full == 0: flush access batch + journal to disk. */
 asper_err asper_flush(asper_ctx *c, int full);
 /* ASPER_NO_THREADS builds: run due background work on the caller.
@@ -389,6 +392,10 @@ typedef struct {
   size_t ops_applied, ops_rejected, recalls_served;
   long long last_cycle_at;      /* unix seconds UTC; 0 = never */
   long long last_compaction_at; /* unix seconds UTC; 0 = never */
+  size_t curation_queued, curation_inflight, curation_bytes;
+  size_t curation_queue_limit;  /* queued + in-flight events; bytes capped at 32 MiB */
+  int curation_backlog;         /* more durable data may need admission; not a count */
+  int curation_suspended;       /* receipt pending; inspect after an interruption */
 } asper_stats;
 asper_err asper_get_stats(asper_ctx *c, asper_stats *out);
 

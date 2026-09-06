@@ -9,6 +9,8 @@
 #define ASPER_CONTEXT_EVENTS 4096u
 #define ASPER_SCOPE_INDEX_BYTES (1024u * 1024u)
 #define ASPER_CURATED_BYTES (8u * 1024u * 1024u)
+asper_err asper_source_curated_load(asper_ctx *c, char (**ids)[37], size_t *count);
+int asper_source_curated_has(char (*ids)[37], size_t count, const char *id);
 typedef struct {
   char id[37];
   unsigned order;

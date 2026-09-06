@@ -529,7 +529,8 @@ asper_err asper_config_load(asper_ctx *c, asper_config *cfg,
                      "config: OpenAI backend requires base_url");
     goto done;
   }
-  e = ASPER_OK;
+  e = cfg->event_queue_max < 1 || cfg->event_queue_max > (int)ASPER_QUEUE_EVENTS ?
+      asper_seterr(c, ASPER_ERR_CONFIG, "config: event_queue_max must be between 1 and %u", ASPER_QUEUE_EVENTS) : ASPER_OK;
 
 done:
   xcdn_document_free(doc);

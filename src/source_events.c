@@ -1,5 +1,6 @@
 /* Durable scoped events and pin overlays. */
 #include "source_internal.h"
+#include "asmodel_json.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -62,6 +63,20 @@ static asper_err apply_pin_log(asper_ctx *c, const char *scope, event_scan *scan
   return e;
 }
 
+/* Capture project identity before deferral, not from the host at replay time. */
+static asper_err turn_origin(asper_ctx *c, char ref[72]) {
+  char *project = NULL, *text = NULL;
+  asper_err e = asper_project_active(c, &project);
+  asmodel_json_value *obj = asmodel_json_object();
+  if (e == ASPER_OK && (!obj || asmodel_json_object_set(obj, "project",
+      asmodel_json_string(project ? project : "")) != 0)) e = ASPER_ERR_NOMEM;
+  if (e == ASPER_OK && !(text = asmodel_json_write(obj, 0))) e = ASPER_ERR_NOMEM;
+  asper_buf body; asper_buf_init(&body);
+  if (e == ASPER_OK) e = asper_buf_printf(&body, "#turn %s", text);
+  if (e == ASPER_OK) e = asper_object_put(c, body.data, body.len, ref);
+  asper_buf_free(&body); asmodel_json_free(obj); free(project); free(text); return e;
+}
+
 asper_err asper_event_append(asper_ctx *c, const asper_event_input *event,
                              char out_id[37]) {
   char id[37];
@@ -81,6 +96,12 @@ asper_err asper_event_append(asper_ctx *c, const asper_event_input *event,
   path = asper_source_scope_path(c, event->scope, "events.log");
   if (!path) return asper_seterr(c, ASPER_ERR_IO,
                                  "source: cannot create scope directory");
+  if (event->object_ref && event->object_ref[0])
+    strcpy(stored.object_ref, event->object_ref);
+  else if (event->kind == ASPER_EVENT_USER || event->kind == ASPER_EVENT_ASSISTANT) {
+    e = turn_origin(c, stored.object_ref);
+    if (e != ASPER_OK) { free(path); return e; }
+  }
   os_mutex_lock(&c->source_mu);
   e = register_scope_locked(c, event->scope);
   if (e != ASPER_OK) goto out;
@@ -91,8 +112,6 @@ asper_err asper_event_append(asper_ctx *c, const asper_event_input *event,
   stored.kind = event->kind;
   stored.pinned = event->pinned != 0;
   stored.text = (char *)event->text;
-  if (event->object_ref) memcpy(stored.object_ref, event->object_ref,
-                                strlen(event->object_ref)+1);
   e = asper_event_log_append(path, &stored);
   if (e == ASPER_OK && out_id) memcpy(out_id, id, 37);
 out:
@@ -102,10 +121,7 @@ out:
     return asper_seterr(c, e, "source: event append failed");
   if (event->kind == ASPER_EVENT_USER ||
       event->kind == ASPER_EVENT_ASSISTANT) {
-    asper_err qe = asper_enqueue_turn(
-        c, event->kind == ASPER_EVENT_ASSISTANT ? ASPER_ROLE_ASSISTANT
-                                                : ASPER_ROLE_USER,
-        event->text, (asper_time)at, id, event->scope, event->object_ref);
+    asper_err qe = asper_source_pending_note(c, event->scope);
     if (qe != ASPER_OK)
       asper_log(c, ASPER_LOG_WARN, "source",
                 "durable event %s awaits later curation: %s", id,

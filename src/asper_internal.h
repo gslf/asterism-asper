@@ -642,6 +642,15 @@ asper_err asper_enqueue_turn(asper_ctx *c, asper_role role,
 /* Rebuild the semantic-curation FIFO from durable source events not yet
  * acknowledged by a successful cycle, and acknowledge one completed batch. */
 asper_err asper_source_replay_pending(asper_ctx *c);
+asper_err asper_source_pending_note(asper_ctx *c, const char *scope);
+asper_err asper_source_pending_capture(asper_ctx *c, size_t *budget);
+void asper_source_pending_release(asper_ctx *c);
+void asper_source_pending_close(asper_ctx *c);
+#define ASPER_QUEUE_EVENTS 4096u
+#define ASPER_QUEUE_BYTES (32u * 1024u * 1024u)
+size_t asper_turn_queue_limit(const asper_ctx *c);
+bool asper_turn_queue_room(asper_ctx *c);
+void asper_turn_queue_release(asper_ctx *c, const asper_turn *turns, size_t n);
 asper_err asper_curation_recover(asper_ctx *c);
 asper_err asper_source_curated_admit(asper_ctx *c, size_t n);
 asper_err asper_source_mark_curated(asper_ctx *c,
@@ -712,6 +721,7 @@ void asper_knowledge_refresh(asper_ctx *c);
 asper_err asper_knowledge_guard(asper_ctx *c);
 
 struct asper_ctx {
+  struct asper_source_pending *source_pending;
   struct asper_knowledge *knowledge;
   FILE *store_lock;
   asper_config cfg;
@@ -731,6 +741,7 @@ struct asper_ctx {
   os_mutex journal_mu;
   os_mutex cache_mu;             /* serializes cache snapshots/replaces */
   os_mutex source_mu;            /* scoped source logs/objects/checkpoints */
+  os_mutex replay_mu;            /* progressive source admission cursors */
   os_mutex err_mu;
   char err_buf[512];
 
@@ -743,6 +754,8 @@ struct asper_ctx {
   os_cond done_cv;              /* recall completion / drain */
   asper_turn *turns;            /* FIFO of unprocessed turns */
   size_t turns_n, turns_cap;
+  size_t turns_bytes, turns_inflight, turns_inflight_bytes;
+  bool source_backlog;          /* durable inputs beyond the admitted FIFO */
   size_t turns_dropped;
   asper_time last_turn_at;      /* 0 = none */
   char (*access_batch)[37];

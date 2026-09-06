@@ -196,12 +196,14 @@ has independent byte/event limits and verifies every selected source frame.
 [Curation receipts](docs/curation-recovery.md) suspend uncertain mutation batches
 instead of proposing them again. Completed receipts reconcile history and source
 acknowledgements on restart; offline operator review preserves partial outcomes.
+[Curation admission](docs/curation-queue.md) bounds queued and in-flight inputs,
+keeps excess events on disk and exposes backlog/receipt status through C and MCP.
 
 Recall reports deadline expiry as `ASPER_ERR_TIMEOUT`. Its absolute operation
 deadline becomes a remaining duration after retrieval and prompt construction.
 Shared and embedded model adapters preserve request-local consumption, partial
 output and cancellation. Unsupported model contracts return
-`ASPER_ERR_UNSUPPORTED` (ABI 6), rather than a generic busy result.
+`ASPER_ERR_UNSUPPORTED`. The current public contract is ABI 7.
 
 Standalone CI reads its asmodel revision from `dependencies.json`. The coordinated
 Asngn release checker verifies that this dependency matches the four-component

@@ -45,9 +45,9 @@ A checkpoint budget of zero excludes the projection explicitly.
 Restart discovery reads metadata before loading uncurated user/assistant events;
 already curated events and diagnostic payloads need not be materialized. Source
 metadata checks are not a full audit of every skipped payload. Grounding reopens
-and verifies its specific source frames. The pending curation queue still owns
-its accepted turns; bounding that queue and adding incremental replay admission
-remain separate work. The explicit bulk `asper_event_list` API and Asngn's bulk
+and verifies its specific source frames. [Curation admission](curation-queue.md)
+now bounds accepted and in-flight turns and refills from per-scope cursors.
+The explicit bulk `asper_event_list` API and Asngn's bulk
 transcript restoration also remain available and can retain complete histories.
 
 Metadata reads reject aliases and special files and check sizes before allocation:

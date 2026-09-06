@@ -534,6 +534,7 @@ static void ctx_destroy(asper_ctx *c, bool store_opened) {
     c->curator.destroy(c->curator.ud);
   asper_models_shutdown(c);
   asper_knowledge_close(c);
+  asper_source_pending_close(c);
   asper_index_free(&c->index);
   if (store_opened) {
     asper_store_close(c);
@@ -555,6 +556,7 @@ static void ctx_destroy(asper_ctx *c, bool store_opened) {
   os_mutex_destroy(&c->log_mu);
   os_mutex_destroy(&c->err_mu);
   os_mutex_destroy(&c->source_mu);
+  os_mutex_destroy(&c->replay_mu);
   os_mutex_destroy(&c->cache_mu);
   os_mutex_destroy(&c->journal_mu);
   os_rwlock_destroy(&c->lock);
@@ -602,6 +604,7 @@ static asper_err asper_open_impl(const asper_open_params *p,
   os_mutex_init(&c->journal_mu);
   os_mutex_init(&c->cache_mu);
   os_mutex_init(&c->source_mu);
+  os_mutex_init(&c->replay_mu);
   os_mutex_init(&c->err_mu);
   os_mutex_init(&c->ev_mu);
   os_mutex_init(&c->log_mu);
@@ -860,78 +863,6 @@ void asper_close(asper_ctx *c) {
 
 /* ---- hot path ----------------------------------------------------------- */
 
-asper_err asper_enqueue_turn(asper_ctx *c, asper_role role,
-                             const char *text_utf8, asper_time now,
-                             const char *source_id, const char *scope, const char *object_ref) {
-  char *copy;
-  asper_turn meta;
-  memset(&meta,0,sizeof meta);
-  if (!c) return ASPER_ERR_INVALID;
-  snprintf(meta.scope,sizeof meta.scope,"%s",scope ? scope : "");
-  meta.evidence.observed_at=now;
-  snprintf(meta.evidence.provenance,sizeof meta.evidence.provenance,"scope:%s",meta.scope);
-  { char *proj=NULL; (void)asper_project_active(c,&proj);
-    snprintf(meta.project,sizeof meta.project,"%s",proj ? proj : "");free(proj);
-  }
-  if (object_ref && object_ref[0]) {
-    void *data=NULL;size_t len=0;
-    if (asper_object_read(c,object_ref,0,0,&data,&len)==ASPER_OK) {
-      xcdn_error_t xe;memset(&xe,0,sizeof xe);
-      xcdn_document_t *doc=xcdn_parse_str(data,len,&xe);
-      if (doc && doc->values_len==1 && xcdn_node_has_tag(doc->values[0],"turn")) {
-        const xcdn_value_t *obj=doc->values[0]->value;
-        const char *keys[]={"workspace","commit","project"};
-        char *dst[]={meta.evidence.workspace,meta.evidence.commit,meta.project};
-        size_t caps[]={sizeof meta.evidence.workspace,sizeof meta.evidence.commit,sizeof meta.project};
-        for (size_t i=0;i<3;i++) {
-          const xcdn_node_t *v=xcdn_object_get(obj,keys[i]);
-          if (v && v->value && v->value->type==XCDN_VAL_STRING)
-            snprintf(dst[i],caps[i],"%s",v->value->data.string);
-        }
-      }
-      if (doc) xcdn_document_free(doc);
-      free(data);
-    }
-  }
-  if (role != ASPER_ROLE_USER && role != ASPER_ROLE_ASSISTANT)
-    return asper_seterr(c, ASPER_ERR_INVALID, "invalid role");
-  if (asper_str_blank(text_utf8))
-    return asper_seterr(c, ASPER_ERR_INVALID, "empty turn text");
-  if (!asper_utf8_count(text_utf8, NULL))
-    return asper_seterr(c, ASPER_ERR_INVALID, "turn text is not valid UTF-8");
-  if (!asper_uuid_valid(source_id))
-    return asper_seterr(c, ASPER_ERR_INVALID, "invalid source event id");
-
-  copy = asper_strdup(text_utf8);
-  if (!copy) return asper_seterr(c, ASPER_ERR_NOMEM, "out of memory");
-
-  os_mutex_lock(&c->ev_mu);
-  if (c->turns_n == c->turns_cap) {
-    size_t ncap = c->turns_cap ? c->turns_cap * 2 : 16;
-    asper_turn *nt = realloc(c->turns, ncap * sizeof *nt);
-    if (!nt) {
-      os_mutex_unlock(&c->ev_mu);
-      free(copy);
-      return asper_seterr(c, ASPER_ERR_NOMEM, "out of memory");
-    }
-    c->turns = nt;
-    c->turns_cap = ncap;
-  }
-  c->turns[c->turns_n]=meta;
-  c->turns[c->turns_n].role = role;
-  c->turns[c->turns_n].text = copy;
-  c->turns[c->turns_n].at = now;
-  memcpy(c->turns[c->turns_n].source_id, source_id, 37);
-  c->turns_n++;
-  c->last_turn_at = now;
-  /* Wake the worker on EVERY enqueued turn so the idle-flush deadline
-   * arms even for a partial batch; turn_batch only decides when a cycle is
-   * due, not when the worker wakes (notes "Post-review amendments"). */
-  if (!c->no_threads && c->worker_running)
-    os_cond_signal(&c->ev_cv);
-  os_mutex_unlock(&c->ev_mu);
-  return ASPER_OK;
-}
 
 asper_err asper_memory_render(asper_ctx *c, const char *base,
                               const char *query, char **out) {
@@ -1446,6 +1377,7 @@ asper_err asper_get_stats(asper_ctx *c, asper_stats *out) {
 
   os_rwlock_rdlock(&c->lock);
   *out = c->stats;
+  out->curation_suspended = c->store.curation_receipt != NULL;
   out->records_identity = 0;
   out->records_context = 0;
   out->records_project = 0;
@@ -1467,6 +1399,12 @@ asper_err asper_get_stats(asper_ctx *c, asper_stats *out) {
   if (c->store.manifest.last_compaction != 0)
     out->last_compaction_at = c->store.manifest.last_compaction;
   os_rwlock_rdunlock(&c->lock);
+  os_mutex_lock(&c->ev_mu);
+  out->curation_queued = c->turns_n; out->curation_inflight = c->turns_inflight;
+  out->curation_bytes = c->turns_bytes + c->turns_inflight_bytes;
+  out->curation_queue_limit = asper_turn_queue_limit(c);
+  out->curation_backlog = c->source_backlog;
+  os_mutex_unlock(&c->ev_mu);
   return ASPER_OK;
 }
 

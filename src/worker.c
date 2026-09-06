@@ -116,32 +116,35 @@ asper_err asper_run_due_work(asper_ctx *c, bool force_cycle, bool full) {
 
   os_mutex_lock(&c->ev_mu);
   tn = c->turns_n;
+  bool backlog = c->source_backlog;
   lta = c->last_turn_at;
   last_maintenance = c->last_maintenance;
   os_mutex_unlock(&c->ev_mu);
 
-  batch_trig = c->cfg.turn_batch > 0 && tn >= (size_t)c->cfg.turn_batch;
+  batch_trig = backlog || (c->cfg.turn_batch > 0 && tn >= (size_t)c->cfg.turn_batch);
   idle_trig = tn > 0 && c->cfg.idle_flush_s > 0 &&
               now - lta >= c->cfg.idle_flush_s;
-  run_cycle = tn > 0 && (force_cycle || batch_trig || idle_trig);
+  run_cycle = (tn > 0 || backlog) && (force_cycle || batch_trig || idle_trig);
   maint_due = c->cfg.maintenance_interval_s > 0 &&
               now - last_maintenance >= c->cfg.maintenance_interval_s;
 
   if (c->has_curator && (run_cycle || full || maint_due)) {
     bool use_slot = !c->no_threads;
     if (use_slot) asper_cycle_slot_acquire(c);
-    if (run_cycle) {
-      /* A full flush drains the accepted snapshot even when scope/revision
-       * boundaries require several isolated curator batches. */
-      size_t limit=full ? tn : 1;
+    size_t limit = 1;
+    if (full) first = asper_source_pending_capture(c, &limit);
+    if ((run_cycle || full) && first == ASPER_OK) {
       for (size_t batch=0;batch<limit;batch++) {
+        e = asper_source_replay_pending(c);
+        if (e != ASPER_OK) { first = e; break; }
         os_mutex_lock(&c->ev_mu);bool pending=c->turns_n>0;os_mutex_unlock(&c->ev_mu);
         if (!pending) break;
-        e = asper_curation_cycle(c, force_cycle || (idle_trig && !batch_trig));
+        e = asper_curation_cycle(c, full || force_cycle || (idle_trig && !batch_trig));
         if (first == ASPER_OK) first = e;
         if (e!=ASPER_OK) break;
       }
     }
+    if (full) asper_source_pending_release(c);
     if (full || maint_due) {
       e = asper_maintenance_review(c, full);
       if (first == ASPER_OK) first = e;
@@ -207,8 +210,8 @@ static void *asper_worker_main(void *arg) {
   while (!c->stop_worker) {
     asper_time now = asper_clock_now(&c->clock);
     size_t tn = c->turns_n;
-    bool batch_trig = c->cfg.turn_batch > 0 &&
-                      tn >= (size_t)c->cfg.turn_batch;
+    bool batch_trig = c->source_backlog || (c->cfg.turn_batch > 0 &&
+                      tn >= (size_t)c->cfg.turn_batch);
     bool idle_trig = tn > 0 && c->cfg.idle_flush_s > 0 &&
                      now - c->last_turn_at >= c->cfg.idle_flush_s;
     asper_time mbase = c->last_maintenance > last_review_try

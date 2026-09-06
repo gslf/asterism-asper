@@ -44,6 +44,7 @@ set(ASPER_TEST_PROGRAMS
   test_stats_projects
   test_source
   test_source_context
+  test_source_pending
 )
 
 # Built only when explicitly requested; it is not a behavioral benchmark.

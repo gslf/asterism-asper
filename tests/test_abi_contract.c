@@ -6,6 +6,10 @@ int main(int argc, char **argv) {
   asper_ctx *ctx = NULL;
   p.memory_root = argv[1];
   if (asper_open(&p,&ctx) != ASPER_OK || !ctx) return 1;
+  asper_stats status = {0};
+  if (asper_get_stats(ctx, &status) != ASPER_OK || status.curation_queue_limit != 256 ||
+      status.curation_queued || status.curation_inflight || status.curation_bytes ||
+      status.curation_backlog || status.curation_suspended) return 3;
   asper_close(ctx);
   return 0;
 }

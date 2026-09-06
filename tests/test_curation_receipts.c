@@ -76,6 +76,8 @@ TEST(interrupted_batches_never_regenerate_and_completed_receipts_recover) {
     size_t expected = stop_stage == 1 ? 0 : stop_stage == 2 ? 1 : 2;
     ASSERT_EQ_INT(records(c), expected);
     int calls = curator.calls;
+    asper_stats current; ASSERT_OK(asper_get_stats(c, &current));
+    ASSERT_EQ_INT(current.curation_suspended, stop_stage < 4);
     if (stop_stage < 4) {
       ASSERT_ERR(asper_flush(c, 1), ASPER_ERR_BUSY);
       ASSERT_TRUE(c->store.curation_receipt != NULL);

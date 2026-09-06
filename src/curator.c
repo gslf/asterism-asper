@@ -124,6 +124,11 @@ static asper_err take_turns(asper_ctx *c, bool force, asper_turn **out,
     return ASPER_ERR_NOMEM;
   }
   memcpy(t, c->turns, take * sizeof *t);
+  for (size_t i = 0; i < take; i++) {
+    size_t bytes = strlen(t[i].text) + 1;
+    c->turns_bytes -= bytes; c->turns_inflight_bytes += bytes;
+  }
+  c->turns_inflight += take;
   memmove(c->turns, c->turns + take, (c->turns_n - take) * sizeof *c->turns);
   c->turns_n -= take;
   os_mutex_unlock(&c->ev_mu);
@@ -137,37 +142,21 @@ static asper_err take_turns(asper_ctx *c, bool force, asper_turn **out,
  * stay behind the restored batch so ordering is preserved. */
 static bool restore_turns(asper_ctx *c, asper_turn *turns, size_t n)
 {
-  asper_turn *grown;
-  size_t need, cap;
-
-  if (!turns || n == 0)
-    return true;
+  if (!turns || n == 0) return true;
   os_mutex_lock(&c->ev_mu);
-  if (n > SIZE_MAX - c->turns_n) {
-    os_mutex_unlock(&c->ev_mu);
-    return false;
-  }
-  need = n + c->turns_n;
-  if (need > c->turns_cap) {
-    cap = c->turns_cap ? c->turns_cap : 16;
-    while (cap < need) {
-      if (cap > SIZE_MAX / 2) {
-        cap = need;
-        break;
-      }
-      cap *= 2;
-    }
-    grown = realloc(c->turns, cap * sizeof *grown);
-    if (!grown) {
-      os_mutex_unlock(&c->ev_mu);
-      return false;
-    }
-    c->turns = grown;
-    c->turns_cap = cap;
+  /* Producers reserve space for in-flight owners; retry never reallocates. */
+  if (n > c->turns_inflight || c->turns_n > c->turns_cap ||
+      n > c->turns_cap - c->turns_n) {
+    os_mutex_unlock(&c->ev_mu); return false;
   }
   memmove(c->turns + n, c->turns, c->turns_n * sizeof *c->turns);
   memcpy(c->turns, turns, n * sizeof *turns);
   c->turns_n += n;
+  c->turns_inflight -= n;
+  for (size_t i = 0; i < n; i++) {
+    size_t bytes = strlen(turns[i].text) + 1;
+    c->turns_bytes += bytes; c->turns_inflight_bytes -= bytes;
+  }
   memset(turns, 0, n * sizeof *turns); /* ownership moved back to the FIFO */
   os_cond_signal(&c->ev_cv);
   os_mutex_unlock(&c->ev_mu);
@@ -181,6 +170,7 @@ static size_t drop_all_turns(asper_ctx *c)
   for (size_t i = 0; i < n; i++)
     free(c->turns[i].text);
   c->turns_n = 0;
+  c->turns_bytes = 0;
   os_mutex_unlock(&c->ev_mu);
   return n;
 }
@@ -673,6 +663,8 @@ asper_err asper_curation_cycle(asper_ctx *c, bool force)
 {
   asper_err guard = asper_curation_guard(c);
   if (guard != ASPER_OK) return guard;
+  guard = asper_source_replay_pending(c);
+  if (guard != ASPER_OK) return guard;
   int64_t t0 = os_monotonic_ms();
   asper_time now = asper_clock_now(&c->clock);
 
@@ -707,7 +699,7 @@ asper_err asper_curation_cycle(asper_ctx *c, bool force)
   rc = asper_curation_transcript(c, turns, n_turns, &included, &transcript);
   if (rc != ASPER_OK) goto out;
   if (included < n_turns && !restore_turns(c, turns + included, n_turns - included)) {
-    rc = ASPER_ERR_NOMEM; goto out;
+    rc = ASPER_ERR_INVALID; goto out;
   }
   n_turns = included;
   rc = asper_curation_admit(c, n_turns);
@@ -827,7 +819,7 @@ asper_err asper_curation_cycle(asper_ctx *c, bool force)
 out:
   if (rc != ASPER_OK && !restore_turns(c, turns, n_turns))
     asper_log(c, ASPER_LOG_ERROR, "curator",
-              "could not restore %zu turn(s) after failure: out of memory",
+              "could not restore %zu turn(s): queue ownership invariant violated",
               n_turns);
   asper_cops_free(cops, n_cops);
   free(reply);
@@ -837,6 +829,7 @@ out:
   free_record_array(handles, n_handles);
   free(transcript);
   free(project);
+  asper_turn_queue_release(c, turns, n_turns);
   free_turns(turns, n_turns);
   return rc;
 

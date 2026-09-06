@@ -27,8 +27,8 @@ store. Full flush returns `ASPER_ERR_BUSY`; startup logs the batch UUID. Source
 events remain reopenable, and the record WAL is preserved for inspection.
 Ordinary host reads/writes still use their existing contracts. The journal range
 may include host operations; it is not an exclusive per-batch effect list.
-The public stats structure does not expose the suspended state; use the error/log
-and offline inspection below.
+The public stats and MCP `memory_stats` expose `curation_suspended`; use the
+error/log and offline inspection below to review the actual receipt.
 
 This preserves partial effects. It is not an atomic batch transaction, rollback
 or exactly-once execution guarantee. Maintenance reviews and ordinary access
@@ -88,7 +88,8 @@ Receipts are at most 1 MiB, with at most 64 KiB
 of proposal text and twelve handles. History uses the 512 MiB event-log limit;
 history and acknowledgement capacity are checked before inference. The 8 MiB
 acknowledgement set is rewritten atomically, adding work proportional to that set
-on completion. The pending queue itself is still unbounded. Selective retention
+on completion. [Progressive admission](curation-queue.md) bounds the pending queue
+including its in-flight inputs, and leaves excess sources on disk. Selective retention
 of receipts, sources and outside-store derivatives remains open.
 
 Checked snapshot reads and backup copies reject aliases. Temporary writes use

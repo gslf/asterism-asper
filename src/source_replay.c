@@ -31,7 +31,7 @@ static asper_err curated_ids_parse(const char *data, size_t len,
   *out = ids; return ASPER_OK;
 }
 
-static int curated_id_has(char (*ids)[37], size_t n, const char *id) {
+int asper_source_curated_has(char (*ids)[37], size_t n, const char *id) {
   return ids && bsearch(id, ids, n, sizeof *ids, source_id_cmp) != NULL;
 }
 
@@ -93,85 +93,15 @@ asper_err asper_source_mark_curated(asper_ctx *c, const asper_turn *turns, size_
   asper_buf_free(&output); free(ids); free(path); return e;
 }
 
-/* The pending queue still owns its accepted turns; this reader avoids a
- * second full-scope payload allocation while recovering them. */
-static asper_err replay_scope(asper_ctx *c, const char *scope, char (*curated)[37],
-                              size_t curated_n, size_t *queued) {
-  asper_source_view view;
-  asper_err e = asper_source_view_open(c, scope, &view);
-  if (e != ASPER_OK) return e;
-  for (uint64_t sequence = 1; sequence <= view.files.count; sequence++) {
-    asper_event event;
-    e = asper_source_view_head(&view, sequence, &event);
-    if (e != ASPER_OK) break;
-    if ((event.kind == ASPER_EVENT_USER || event.kind == ASPER_EVENT_ASSISTANT) &&
-        !curated_id_has(curated, curated_n, event.id)) {
-      asper_role role = event.kind == ASPER_EVENT_USER ? ASPER_ROLE_USER : ASPER_ROLE_ASSISTANT;
-      e = asper_source_view_read(&view, sequence, &event);
-      if (e == ASPER_OK) e = asper_enqueue_turn(c, role, event.text, (asper_time)event.at, event.id, scope, event.object_ref);
-      if (e == ASPER_OK) (*queued)++;
-    }
-    free(event.text);
-    if (e != ASPER_OK) break;
-  }
-  asper_source_view_close(&view); return e;
-}
-
-asper_err asper_source_replay_pending(asper_ctx *c) {
-  char *scopes_dir = NULL, *index_path = NULL, *curated_path = NULL;
-  char *index = NULL, *curated = NULL;
-  size_t index_len = 0, curated_len = 0, queued = 0;
-  char (*curated_ids)[37] = NULL;
-  size_t curated_n = 0;
-  asper_err e;
-  if (!c) return ASPER_ERR_INVALID;
-  /* Preserve the source on disk while the operator reviews partial effects. */
-  if (c->store.curation_receipt) return ASPER_OK;
-  scopes_dir = asper_source_dir(c, "scopes");
-  if (!scopes_dir) return ASPER_ERR_IO;
-  index_path = os_path_join(scopes_dir, "index.log");
-  curated_path = os_path_join(c->store.root, "curated-events.log");
-  if (!index_path || !curated_path) {
-    e = ASPER_ERR_NOMEM;
-    goto out;
-  }
-  e = asper_source_text_read(index_path, ASPER_SCOPE_INDEX_BYTES, &index, &index_len);
-  if (e == ASPER_ERR_NOT_FOUND) {
-    e = ASPER_OK;
-    goto out;
-  }
-  if (e != ASPER_OK) goto out;
-  if (!index || index_len == 0) goto out;
-  e = asper_source_text_read(curated_path, ASPER_CURATED_BYTES, &curated, &curated_len);
+/* Load once for a replay lifetime. New completions are behind admission cursors. */
+asper_err asper_source_curated_load(asper_ctx *c, char (**ids)[37], size_t *count) {
+  char *path = os_path_join(c->store.root, "curated-events.log"), *text = NULL;
+  size_t bytes = 0;
+  if (!path) return ASPER_ERR_NOMEM;
+  os_mutex_lock(&c->source_mu);
+  asper_err e = asper_source_text_read(path, ASPER_CURATED_BYTES, &text, &bytes);
+  os_mutex_unlock(&c->source_mu);
   if (e == ASPER_ERR_NOT_FOUND) e = ASPER_OK;
-  if (e != ASPER_OK) goto out;
-  e = curated_ids_parse(curated, curated_len, &curated_ids, &curated_n);
-  if (e != ASPER_OK) goto out;
-  for (char *p = index, *end = index + index_len; p < end;) {
-    char *nl = memchr(p, '\n', (size_t)(end - p));
-    size_t sn = nl ? (size_t)(nl - p) : (size_t)(end - p);
-    char scope[65];
-    if (!nl || sn == 0 || sn >= sizeof scope) { e = ASPER_ERR_PARSE; goto out; }
-    memcpy(scope, p, sn);
-    scope[sn] = '\0';
-    if (!asper_source_scope_valid(scope)) {
-      e = asper_seterr(c, ASPER_ERR_PARSE,
-                       "source: invalid scope in durable index");
-      goto out;
-    }
-    e = replay_scope(c, scope, curated_ids, curated_n, &queued);
-    if (e != ASPER_OK) goto out;
-    p = nl ? nl + 1 : end;
-  }
-  if (queued)
-    asper_log(c, ASPER_LOG_INFO, "source",
-              "replayed %zu durable event(s) awaiting curation", queued);
-out:
-  free(curated_ids);
-  free(curated);
-  free(index);
-  free(curated_path);
-  free(index_path);
-  free(scopes_dir);
-  return e;
+  if (e == ASPER_OK) e = curated_ids_parse(text, bytes, ids, count);
+  free(text); free(path); return e;
 }

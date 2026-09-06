@@ -753,6 +753,12 @@ static int tool_memory_stats(asper_ctx *c, const jx_value *args,
                       jx_int((long long)st.journal_ops)) == 0;
   ok &= jx_object_set(o, "cycles_run",
                       jx_int((long long)st.cycles_run)) == 0;
+  ok &= jx_object_set(o, "curation_queued", jx_int((long long)st.curation_queued)) == 0;
+  ok &= jx_object_set(o, "curation_inflight", jx_int((long long)st.curation_inflight)) == 0;
+  ok &= jx_object_set(o, "curation_bytes", jx_int((long long)st.curation_bytes)) == 0;
+  ok &= jx_object_set(o, "curation_queue_limit", jx_int((long long)st.curation_queue_limit)) == 0;
+  ok &= jx_object_set(o, "curation_backlog", jx_bool(st.curation_backlog)) == 0;
+  ok &= jx_object_set(o, "curation_suspended", jx_bool(st.curation_suspended)) == 0;
   ok &= jx_object_set(o, "ops_applied",
                       jx_int((long long)st.ops_applied)) == 0;
   ok &= jx_object_set(o, "ops_rejected",
