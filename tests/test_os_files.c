@@ -73,7 +73,28 @@ TEST(temporary_root_resolves_parent_alias_without_relaxing_blob_checks) {
 }
 #endif
 
+TEST(store_lock_allows_readers_and_excludes_another_writer) {
+  char root[256], path[512];
+  ASSERT_TRUE(asper_test_tmpdir(root));
+  snprintf(path, sizeof path, "%s/.writer.lock", root);
+  FILE *lock = os_store_lock(path);
+  ASSERT_TRUE(lock != NULL);
+  FILE *second = os_store_lock(path);
+  ASSERT_TRUE(second == NULL);
+  FILE *reader = NULL;
+  uint64_t size = 0;
+  ASSERT_OK(os_blob_open(path, &reader, &size));
+  ASSERT_TRUE(reader != NULL);
+  fclose(reader);
+  fclose(lock);
+  second = os_store_lock(path);
+  ASSERT_TRUE(second != NULL);
+  fclose(second);
+  asper_test_rmtree(root);
+}
+
 TEST_LIST = {
+  TEST_ENTRY(store_lock_allows_readers_and_excludes_another_writer),
   TEST_ENTRY(temporary_root_supports_protected_io),
   TEST_ENTRY(read_stream_can_be_synced_without_losing_its_position),
   TEST_ENTRY(read_stream_stamp_detects_deletion_before_close),
