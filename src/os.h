@@ -128,7 +128,7 @@ void os_rwlock_wrunlock(os_rwlock *l);
 /* Atomically replace dst with src (rename(2) / ReplaceFileW+MoveFileExW).
  * src is consumed on success. */
 asper_err os_file_replace(const char *src, const char *dst);
-/* fsync/_commit an open stream. */
+/* Flush stdio and sync the open file, including validated read streams. */
 asper_err os_fsync(FILE *f);
 /* POSIX directory durability; Windows has no equivalent portable guarantee. */
 asper_err os_sync_parent(const char *path);

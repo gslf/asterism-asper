@@ -16,12 +16,15 @@ asper_err os_stream_stamp(FILE *stream, os_file_stamp *stamp) {
   memset(stamp, 0, sizeof *stamp);
 #ifdef _WIN32
   HANDLE handle = (HANDLE)_get_osfhandle(_fileno(stream));
-  BY_HANDLE_FILE_INFORMATION info;
-  FILE_BASIC_INFO basic;
-  if (!GetFileInformationByHandle(handle, &info) ||
+  FILE_STANDARD_INFO info = {0};
+  FILE_BASIC_INFO basic = {0};
+  if (!GetFileInformationByHandleEx(handle, FileStandardInfo, &info, (DWORD)sizeof info) ||
       !GetFileInformationByHandleEx(handle, FileBasicInfo, &basic, (DWORD)sizeof basic)) return ASPER_ERR_IO;
-  stamp->size = ((uint64_t)info.nFileSizeHigh << 32) | info.nFileSizeLow;
-  stamp->links = info.nNumberOfLinks;
+  if (info.Directory || info.EndOfFile.QuadPart < 0) return ASPER_ERR_INVALID;
+  stamp->size = (uint64_t)info.EndOfFile.QuadPart;
+  /* Windows keeps the link count until the final handle closes. A queued
+   * deletion must invalidate captured views while their handles are open. */
+  stamp->links = info.DeletePending ? 0 : info.NumberOfLinks;
   stamp->modified[0] = (uint64_t)basic.LastWriteTime.QuadPart;
   stamp->changed[0] = (uint64_t)basic.ChangeTime.QuadPart;
 #else

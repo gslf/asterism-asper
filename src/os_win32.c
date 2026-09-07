@@ -263,11 +263,29 @@ asper_err os_fsync(FILE *f)
 {
     if (f == NULL)
         return ASPER_ERR_INVALID;
-    if (fflush(f) != 0)
+    /* Unlike POSIX fflush, the Windows CRT discards a read buffer without
+     * rewinding the underlying offset. Preserve the logical position. */
+    fpos_t position;
+    if (fgetpos(f, &position) != 0 || fflush(f) != 0 ||
+        fsetpos(f, &position) != 0)
         return ASPER_ERR_IO;
-    if (_commit(_fileno(f)) != 0)
+    HANDLE handle = (HANDLE)_get_osfhandle(_fileno(f));
+    if (handle == INVALID_HANDLE_VALUE)
         return ASPER_ERR_IO;
-    return ASPER_OK;
+    if (FlushFileBuffers(handle))
+        return ASPER_OK;
+    if (GetLastError() != ERROR_ACCESS_DENIED)
+        return ASPER_ERR_IO;
+    /* Receipt recovery also syncs a validated read-only stream. Windows
+     * requires write access to flush it. Reopen the same object by handle,
+     * preserving its identity and the original stream's read position. */
+    HANDLE writable = ReOpenFile(handle, GENERIC_WRITE,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, 0);
+    if (writable == INVALID_HANDLE_VALUE)
+        return ASPER_ERR_IO;
+    asper_err e = FlushFileBuffers(writable) ? ASPER_OK : ASPER_ERR_IO;
+    if (!CloseHandle(writable)) e = ASPER_ERR_IO;
+    return e;
 }
 
 asper_err os_mkdir_p(const char *path)

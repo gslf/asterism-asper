@@ -164,7 +164,11 @@ TEST(source_views_capture_pins_and_reject_frames_damaged_after_open) {
   asper_err e = asper_source_view_read(&view, 1, &item);
   int empty = !item.text; free(item.text);
   asper_source_view_close(&view); close_fixture(c, root);
-  ASSERT_EQ_INT(e, ASPER_ERR_PARSE); ASSERT_TRUE(empty);
+  if (e != ASPER_ERR_PARSE) {
+    ASPER_FAILF("damage=%d: got %s, expected ASPER_ERR_PARSE", damage, asper_err_name(e));
+    return;
+  }
+  ASSERT_TRUE(empty);
   }
 }
 

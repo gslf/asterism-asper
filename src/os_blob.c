@@ -86,7 +86,7 @@ asper_err os_directory_canonical(const char *path, char **out) {
       NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
   free(wide);
   if (handle == INVALID_HANDLE_VALUE) return ASPER_ERR_IO;
-  BY_HANDLE_FILE_INFORMATION info;
+  BY_HANDLE_FILE_INFORMATION info = {0};
   asper_err e = ASPER_OK;
   if (!GetFileInformationByHandle(handle, &info) || !(info.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) e = ASPER_ERR_INVALID;
   DWORD size = e == ASPER_OK ? GetFinalPathNameByHandleW(handle, NULL, 0, FILE_NAME_NORMALIZED) : 0;
@@ -128,7 +128,9 @@ asper_err os_blob_open(const char *path, FILE **out, uint64_t *size) {
     DWORD error = GetLastError(); free(wide);
     return error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND ? ASPER_ERR_NOT_FOUND : ASPER_ERR_IO;
   }
-  BY_HANDLE_FILE_INFORMATION info;
+  /* MSVC does not track initialization by GetFileInformationByHandle
+   * through the later error-code checks before the size is consumed. */
+  BY_HANDLE_FILE_INFORMATION info = {0};
   if (GetFileType(handle) != FILE_TYPE_DISK || !GetFileInformationByHandle(handle, &info) ||
       (info.dwFileAttributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT))) e = ASPER_ERR_INVALID;
   if (e == ASPER_OK) {
