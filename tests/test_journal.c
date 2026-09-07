@@ -92,7 +92,7 @@ static char *build_full_journal(size_t *out_len, size_t *out_lines) {
   memset(&op, 0, sizeof op);
   op.kind = ASPER_OP_INSERT;
   op.at = T0 + 1;
-  op.record = mk_record(ID2, ASPER_SECTION_IDENTITY, "You are Asper",
+  op.record = mk_record(ID2, ASPER_SECTION_IDENTITY, "You are asper",
                         ASPER_SRC_SEED, 1.0, T0 + 1);
   if (!op.record || !put_line(&buf, &op)) goto fail;
 
@@ -193,7 +193,7 @@ TEST(op_roundtrip_all_kinds) {
   ASSERT_EQ_DBL(asper_record_relevance(r1), 0.70, 1e-9); /* .60+.05+.05 */
   ASSERT_TRUE(!asper_record_deprecated(r1));
   /* R2: locked via SET_LOCKED, relevance capped at 1.0 */
-  ASSERT_EQ_STR(asper_record_content(r2), "You are Asper");
+  ASSERT_EQ_STR(asper_record_content(r2), "You are asper");
   ASSERT_TRUE(asper_record_locked(r2));
   ASSERT_EQ_INT(asper_record_access_count(r2), 1);
   ASSERT_EQ_DBL(asper_record_relevance(r2), 1.0, 1e-9);

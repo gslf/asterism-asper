@@ -23,7 +23,7 @@ def store(path, *, allow_erasing=False):
         check_owner(os.fstat(root))
         # Do not turn an arbitrary directory into a store by creating a lock.
         if not present(root, "manifest.xcdn") and not present(root, ERASE):
-            raise ValueError("not an initialized Asper store")
+            raise ValueError("not an initialized asper store")
         fd = os.open(LOCK, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW |
                      os.O_NONBLOCK | os.O_CLOEXEC, 0o600, dir_fd=root)
         try:

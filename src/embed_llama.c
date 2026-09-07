@@ -59,7 +59,7 @@
 /* llama.cpp logs to stderr by default. The library must never write to
  * stdout/stderr on its own initiative, and this global callback has no
  * asper_ctx to forward into asper_log, so it deliberately drops every
- * record: llama output is silenced entirely. Asper reports model
+ * record: llama output is silenced entirely. ⁂ asper reports model
  * load/inference failures through its own error and log channels. */
 static void asper_llama_log_silent(enum ggml_log_level level,
                                    const char *text, void *ud)

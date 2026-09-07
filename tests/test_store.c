@@ -222,7 +222,7 @@ static const char HAND_IDENTITY[] =
     "  id: u\"7c9e6679-7425-40de-944f-e07fc1f90ae7\",\n"
     "  section: \"identity\",\n"
     "  project: null,\n"
-    "  content: \"\"\"You are Asper.\n"
+    "  content: \"\"\"You are asper.\n"
     "Stay concise, stay \"kind\".\"\"\",\n"
     "  source: \"seed\",\n"
     "  created_at: t\"2026-07-29T10:12:00Z\",\n"
@@ -253,7 +253,7 @@ TEST(handwritten_identity_file) {
   ASSERT_EQ_STR(asper_record_id(out[0]), id);
   ASSERT_EQ_INT(asper_record_section(out[0]), ASPER_SECTION_IDENTITY);
   ASSERT_EQ_STR(asper_record_content(out[0]),
-                "You are Asper.\nStay concise, stay \"kind\".");
+                "You are asper.\nStay concise, stay \"kind\".");
   ASSERT_EQ_STR(asper_record_source(out[0]), "seed");
   ASSERT_EQ_INT(asper_record_created_at(out[0]), T0);
   ASSERT_EQ_INT(asper_record_access_count(out[0]), 3);
@@ -268,10 +268,10 @@ TEST(handwritten_identity_file) {
   ASSERT_ERR(asper_memory_update(c, id, "rewritten"), ASPER_ERR_LOCKED);
   ASSERT_ERR(asper_memory_deprecate(c, id, "nope"), ASPER_ERR_LOCKED);
   ASSERT_OK(asper_memory_set_locked(c, id, 0));
-  ASSERT_OK(asper_memory_update(c, id, "You are Asper, rewritten."));
+  ASSERT_OK(asper_memory_update(c, id, "You are asper, rewritten."));
   ASSERT_OK(asper_memory_list(c, ASPER_SECTION_IDENTITY, NULL, 0, &out, &n));
   ASSERT_EQ_INT(n, 1);
-  ASSERT_EQ_STR(asper_record_content(out[0]), "You are Asper, rewritten.");
+  ASSERT_EQ_STR(asper_record_content(out[0]), "You are asper, rewritten.");
   ASSERT_EQ_INT(asper_record_updated_at(out[0]), T0 + 100);
   asper_records_free(out, n);
   asper_close(c);

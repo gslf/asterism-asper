@@ -1,4 +1,4 @@
-// examples/config.xcdn — standard configuration reference for Asper.
+// examples/config.xcdn — standard configuration reference for ⁂ asper.
 //
 // Every key below is optional and shown at its built-in default: an empty
 // file (or omitting --config entirely) behaves identically to this one.

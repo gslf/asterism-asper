@@ -1,17 +1,17 @@
 # ⁂ asper — asterism persistence
 
-An identitarian memory system for LLMs. 
+### Durable memory and context subsystem for small and large language models.
 
-Asper is a local, self-curated long-term memory subsystem for language models, with a specific focus on the smaller ones. It gives a host model  a durable sense of **who it is** (identity), **who it is talking to** (context), and **what it is working on** (projects), by maintaining a retrieval-augmented memory that is written, reorganized and pruned autonomously by a second, micro local *curator* model.
+>⁂ asterism is a modular agent harness that turns language models into tools for creating and completing real-world workflows and automations. **SLM** and **local inference** friendly. Read the central [architecture decisions and system value](https://github.com/gslf/asterism-asngn/blob/main/docs/ARCHITECTURE.md).
 
-Identity is the first layer when its records remain eligible. The store uses inspectable [xCDN](https://github.com/gslf/xCDN) payloads in checked frames; edits go through the API or MCP tools. Curator inference and embeddings run in-process via llama.cpp, on a worker thread. They are owned by the shared `asmodel` runtime: standalone Asper creates its own manager, while an embedding host can lend a process-wide manager through `asper_open_at_with_models`.
+⁂ asper preserves identity, user context, project knowledge, workflow state and execution evidence beyond a single model context window. A separate curator
+model derives compact semantic records from exact events, while the host retains control over memory validity and permissions. 
 
-Exact scoped events are the source of truth. Asper also owns atomic working
-checkpoints and content-addressed objects for large payloads. Semantic records
-are bounded derivatives with source-event UUID provenance. Unprocessed inputs
-are recovered after restart; interrupted mutation batches require reconciliation.
-Compaction saves context tokens without deleting
-information.
+The local store uses inspectable [xCDN](https://github.com/gslf/xCDN). Curation runs on a worker thread. Curator inference and embeddings use the shared ⁂ asmodel runtime through embedded llama.cpp or
+supported remote adapters. Standalone ⁂ asper creates its own manager, an embedding host can lend a process-wide manager through `asper_open_at_with_models`.
+Local persistence does not require local inference.
+
+⁂ asper supplies memory to **⁂ asngn**, retains evidence from **⁂ astools** actions, and uses **⁂ asmodel** for inference. It can also serve independent hosts through C or MCP. 
 
 Full specification: [docs/SPECS.md](docs/SPECS.md).
 
@@ -35,49 +35,46 @@ cmake --build build -j
 ctest --test-dir build --output-on-failure
 ```
 
-`asterism-asmodel` is expected next to this repository; use
-`-DASPER_ASMODEL_DIR=/path/to/asterism-asmodel` for another layout. CMake
-options: `ASPER_BUILD_MCP` (ON), `ASPER_BUILD_TESTS` (ON),
-`ASPER_NO_THREADS` (OFF), `ASPER_SANITIZERS` (OFF), `ASPER_WITH_LLAMA`
-(ON — set OFF for a fast, inference-less build, the full test suite passes
+`asterism-asmodel` is expected next to this repository, use
+`-DASPER_ASMODEL_DIR=/path/to/asterism-asmodel` for another layout. 
+
+
+CMake options: 
+- `ASPER_BUILD_MCP` (ON)
+- `ASPER_BUILD_TESTS` (ON)
+- `ASPER_NO_THREADS` (OFF) 
+- `ASPER_SANITIZERS` (OFF)
+- `ASPER_WITH_LLAMA` (ON. Set OFF for a fast, inference-less build, the full test suite passes
 either way).
 
 **Upstream llama.cpp compatibility.** The pinned `deps/llama.cpp`
-submodule is built unmodified: Asper does not apply or require a custom
-fork. Calls that model-controlled data reaches go through the small C++
-adapter in `src/llama_guard.cpp`; exceptions are converted into the error
-returns the C callers already handle. Its grammar sampler adapter also
-contains malformed grammar state at the public sampler boundary and ends
-generation cleanly, without changing llama.cpp sources.
-
+submodule is built unmodified: ⁂ asper does not apply or require a custom
+fork.
 
 ## Configuration
 
-Everything Asper needs beyond the memory root — model paths, token budgets, retrieval weights, curation timing, decay, logging — comes from one optional file: `config.xcdn`. 
+Everything ⁂ asper needs beyond the memory root (model paths, token budgets, retrieval weights, curation timing, decay, logging) comes from one optional file `config.xcdn`.
 
 ```sh
 asper-mcp --root ./memory --config config.xcdn
 ```
 
-```c
-asper_open_params p = { .memory_root = "./memory", .config_path = "config.xcdn" };
-```
+Every key is optional and already has a sensible default, so you only need to write the ones you want to change/. Unknown keys are ignored with a warning, wrong types fail `asper_open` with `ASPER_ERR_CONFIG`. 
 
-Every key is optional and already has a sensible default, so you only need to write the ones you want to change; unknown keys are ignored with a warning, wrong types fail `asper_open` with `ASPER_ERR_CONFIG`. A fully-documented copy with every key spelled out at its default value ships at [examples/config.xcdn](examples/config.xcdn) in this repo — copy it and trim it down to what you actually want to override.
+A fully-documented copy with every key spelled out at its default value ships at [examples/config.xcdn](examples/config.xcdn) in this repo.
 
 ### Models
 
-The two GGUF models Asper needs are just two keys in that file: `curator.model_path` and `embedding.model_path`. Relative paths are
+The two GGUF models ⁂ asper needs are just two keys in that file: `curator.model_path` and `embedding.model_path`. Relative paths are
 resolved against the **current working directory of the process**. With no config
 file at all, the defaults are:
 
 - Curator: `models/qwen2.5-1.5b-instruct-q4_k_m.gguf`
 - Embeddings: `models/multilingual-e5-small-q8_0.gguf`
 
-When a model file is missing, `asper_open` logs a warning and continues in degraded mode (identity injection still works; retrieval/curation/recall are disabled until models are available).
+When a model file is missing, `asper_open` logs a warning and continues in degraded mode (identity injection still works, retrieval/curation/recall are disabled until models are available).
 
-Both roles can instead use an OpenAI-compatible API (LM Studio, vLLM,
-Unsloth Studio, or another compatible server):
+Both roles can instead use an OpenAI-compatible API (LM Studio, vLLM, Unsloth Studio, or another compatible server):
 
 ```xcdn
 #asper_config {
@@ -98,9 +95,13 @@ Unsloth Studio, or another compatible server):
 }
 ```
 
-`api_key_env` names an environment variable; credentials are never stored
-in the xCDN file. `provider` is explicit: `"llama-server"`, `"lmstudio"`,
-`"vllm"`, or `"generic"`.
+`api_key_env` names an environment variable, credentials are never stored in the xCDN file. 
+
+`provider` is explicit: `
+- "llama-server"`
+- `"lmstudio"`
+- `"vllm"`
+- `"generic"`
 
 ## Quick start (C API)
 
@@ -128,9 +129,6 @@ asper_context_pack_free(&context);
 asper_close(ctx);
 ```
 
-`asper_open` resolves paths relative to the process directory. Hosts can use
-`asper_open_at(&p, engine_root, &ctx)` to provide an explicit base directory.
-Check `asper_abi_version()` against the header used to compile the host.
 
 ## MCP server
 
@@ -147,66 +145,3 @@ Tools: `memory_search`, `memory_recall`, `memory_insert`, `memory_update`, `memo
 ## License
 
 MIT — see [LICENSE](LICENSE).
-
-Semantic retrieval now combines exact identifiers, BM25 and optional vectors with
-rank fusion and deterministic reranking. `asper_record_evidence` exposes the
-claim kind, confidence, provenance, workspace/revision and expiry;
-`asper_memory_insert_evidenced` records host-supplied evidence. Curator hypotheses
-expire and cannot overwrite host declarations/observations. Explicit-project
-context/recall APIs support concurrent hosts without switching shared state.
-
-### Shared embedding pipeline
-
-The shared binding borrows preprocessing and pipeline identity from the host's asmodel
-manager. `asper_model_binding` identifies the model and dimension; it no longer
-accepts a separately supplied cache hash. Standalone configuration retains
-`embedding.query_prefix` / `passage_prefix` and adds `revision`, `tokenizer` and
-`pooling` for remote pipelines. Empty revision metadata forces vector rebuilds
-on reopen. Embedded identities use the GGUF hash and mean pooling; oversized
-inputs return `ASPER_ERR_LIMIT` instead of truncating. Manager calls support
-batch receipts, cancellation and remaining duration. Existing public memory
-operations use the configured recall timeout unless an internal caller supplies
-more specific controls; turn-wide cancellation propagation is still separate.
-
-### Grounded memory
-
-[Grounding and correction history](docs/knowledge.md) binds exact source spans,
-versioned dependencies and support/contradiction/correction links to claim hashes.
-Stale or revoked knowledge is excluded from retrieval; history stays inspectable.
-Host observations must be renewed after restart. The old standalone `supersedes`
-field was removed in favor of version-bound grounding links. This is a validity
-contract, not a claim that referenced text is necessarily true.
-
-### Checked persistence (store format 2)
-
-[Storage and recovery](docs/storage.md) describes operation/snapshot framing,
-backup validation, sync policy, quotas and fault tests. Complete corruption and
-uncertain durability fail closed. Old store versions require deliberate conversion;
-there is no automatic migration or compatibility path.
-
-[Offline maintenance](docs/data-governance.md) provides checked whole-store export,
-verification and resumable erasure on Linux without loading models. A persistent
-erasure guard prevents recovery or curation from repopulating deleted data.
-Selective retention and authenticated multi-user administration remain separate.
-[Object reads](docs/source-objects.md) verify the full content hash while retaining
-only the requested slice, with an explicit 64 MiB object bound and hashing cost.
-[Progressive history](docs/source-context.md) selects old pins and recent events
-from an indexed prefix without retaining the complete scope's payloads. Context
-has independent byte/event limits and verifies every selected source frame.
-[Curation receipts](docs/curation-recovery.md) suspend uncertain mutation batches
-instead of proposing them again. Completed receipts reconcile history and source
-acknowledgements on restart; offline operator review preserves partial outcomes.
-[Curation admission](docs/curation-queue.md) bounds queued and in-flight inputs,
-keeps excess events on disk and exposes backlog/receipt status through C and MCP.
-
-Recall reports deadline expiry as `ASPER_ERR_TIMEOUT`. Its absolute operation
-deadline becomes a remaining duration after retrieval and prompt construction.
-Shared and embedded model adapters preserve request-local consumption, partial
-output and cancellation. Unsupported model contracts return
-`ASPER_ERR_UNSUPPORTED`. The current public contract is ABI 8.
-[Offline source deferral](docs/curation-deferral.md) postpones oversized curation
-inputs without acknowledging or deleting them, with explicit removal on review.
-
-Standalone CI reads its asmodel revision from `dependencies.json`. The coordinated
-Asngn release checker verifies that this dependency matches the four-component
-manifest; all standalone jobs use that same declared pin.

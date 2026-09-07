@@ -1,5 +1,5 @@
 /*
- * sha256.c — SHA-256 per FIPS 180-4. Written for Asper from the published
+ * sha256.c — SHA-256 per FIPS 180-4. Written for ⁂ asper from the published
  * specification; streaming, one-shot and file helpers.
  */
 

@@ -1,7 +1,7 @@
-# asper — Agent Plugin
+# ⁂ asper — Agent Plugin
 
 This directory is an [Agent Plugins 1.0](https://agent-plugins.org/specification)
-package for Asper: it declares the `asper-mcp` memory server (`mcp.json`) and
+package for ⁂ asper: it declares the `asper-mcp` memory server (`mcp.json`) and
 ships the `asper-memory` skill (`skills/`), which teaches a host agent the
 intended memory workflow. Any Agent Plugins-capable client (VS Code, Cursor,
 GitHub Copilot, ChatGPT & Codex, Kiro, …) can consume it; each client documents

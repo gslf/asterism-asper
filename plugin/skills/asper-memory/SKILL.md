@@ -1,11 +1,11 @@
 ---
 name: asper-memory
-description: Work with the Asper persistent memory (asper MCP server) — recall what is known about the user, the environment, and past projects; keep the memory current as the conversation unfolds. Use at the start of a conversation, whenever the user references past interactions or preferences, when switching projects, and when the user asks you to remember or forget something.
+description: Work with the ⁂ asper persistent memory (⁂ asper MCP server) — recall what is known about the user, the environment, and past projects; keep the memory current as the conversation unfolds. Use at the start of a conversation, whenever the user references past interactions or preferences, when switching projects, and when the user asks you to remember or forget something.
 ---
 
-# Asper memory
+# ⁂ asper memory
 
-Asper is a local, offline, long-term memory attached to this agent through the
+⁂ asper is a local, offline, long-term memory attached to this agent through the
 `asper` MCP server. Records live in three sections: **identity** (who the agent
 is: persona, values, tone — always injected, never decays), **context** (facts
 about the user and the environment — decays with a 30-day half-life), and
@@ -65,10 +65,10 @@ forget something — otherwise trust the curator.
 
 ## Degraded mode
 
-If the local GGUF models (curator + embeddings) are not installed, Asper runs
+If the local GGUF models (curator + embeddings) are not installed, ⁂ asper runs
 degraded: identity injection, insert, list, update, and deprecate still work,
 but semantic search, recall, retrieval-based injection, and curation are
 disabled. If `memory_search`/`memory_recall` error or context materialization
 returns only identity, say so plainly and tell the user to install the two model files
-into the `models/` directory of Asper's data directory (see the plugin README)
+into the `models/` directory of ⁂ asper's data directory (see the plugin README)
 — do not silently pretend the memory is empty.

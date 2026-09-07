@@ -5,7 +5,7 @@
  * llama.cpp is C++ behind a C API, and several of its paths can throw
  * (grammar accept on a piece that overruns the root, tokenizers on invalid
  * UTF-8, chat-template detection on unknown templates, allocation
- * failures). Asper's callers are C translation units: an exception that
+ * failures). ⁂ asper's callers are C translation units: an exception that
  * escapes the C API has no handler anywhere on the stack and terminates
  * the whole host process (observed on Windows as the silent fast-fail
  * 0xC0000409). These wrappers are the single C++ seam where such

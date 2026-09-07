@@ -1,4 +1,4 @@
-/* Shared model-manager bridge. Standalone Asper owns a manager; embedding
+/* Shared model-manager bridge. Standalone ⁂ asper owns a manager; embedding
  * hosts may lend one with asper_open_at_with_models. */
 #include "asper_internal.h"
 

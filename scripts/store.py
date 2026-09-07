@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Maintain an offline Asper store and reconcile curation (Linux, Python 3.11+)."""
+"""Maintain an offline asper store and reconcile curation (Linux, Python 3.11+)."""
 import argparse
 import json
 import sys

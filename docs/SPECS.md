@@ -1,4 +1,4 @@
-# Asper — Architecture and Design
+# ⁂ asper — Architecture and Design
 
 ## 1. Why this project exists
 
@@ -8,33 +8,38 @@ process restarts. Replaying the complete history is lossless but becomes slower
 and more expensive at every turn; keeping only a summary is cheap but eventually
 loses evidence and accumulates errors.
 
-Asper resolves this tension by separating permanent source memory from bounded
+⁂ asper resolves this tension by separating permanent source memory from bounded
 model context:
 
 > Exact events are the source of truth. Semantic memory, checkpoints and prompt
 > context are compact views that can be rebuilt without deleting the source.
 
-The result is durable memory designed for small local models: limited context is
-used for the information most likely to matter, while every omitted detail
-remains recoverable.
+The result is durable workflow memory for the ⁂ asterism harness and independent
+hosts. It is designed to help small language models use limited context, and is
+also useful with larger models. Persistence is local; inference can be embedded
+or remote through a suitable ⁂ asmodel adapter. Context selection keeps exact
+stored sources recoverable instead of replacing them with a summary.
 
-## 2. Place in Asterism
+See the central [architecture decisions and system value](https://github.com/gslf/asterism-asngn/blob/main/docs/ARCHITECTURE.md)
+for the rationale across all four projects.
+
+## 2. Place in ⁂ asterism
 
 The four projects divide responsibilities as follows:
 
-- **asmodel** runs and shares model providers.
-- **Asper** owns all durable memory and context compaction.
-- **astools** describes and executes tools safely.
-- **asngn** orchestrates turns using the other three components.
+- **⁂ asmodel** runs and shares model providers.
+- **⁂ asper** owns all durable memory and context compaction.
+- **⁂ astools** describes and executes tools safely.
+- **⁂ asngn** orchestrates turns using the other three components.
 
-This ownership boundary is deliberate. asngn may request a context or commit a
+This ownership boundary is deliberate. ⁂ asngn may request a context or commit a
 checkpoint, but it does not maintain a second transcript summary or a competing
-memory store. Tool payloads that are too large for a prompt also become Asper
+memory store. Tool payloads that are too large for a prompt also become ⁂ asper
 objects rather than private engine blobs.
 
 ## 3. The memory model
 
-Asper maintains three complementary forms of information.
+⁂ asper maintains three complementary forms of information.
 
 ### 3.1 Exact scoped events
 
@@ -46,7 +51,7 @@ Events are immutable and ordered. Appending is synchronous and durable: success
 means the exact UTF-8 payload is stored before the call returns. A curator model
 is never on this critical path.
 
-A scope is a host-defined stable name, usually an asngn session. Events can be
+A scope is a host-defined stable name, usually an ⁂ asngn session. Events can be
 pinned so context selection retains particularly important source material.
 
 ### 3.2 Semantic records
@@ -84,8 +89,8 @@ The normal flow is linear:
 2. Appending queues those event UUIDs for background curation.
 3. The curator derives or updates semantic records with source provenance.
 4. The successful curation cycle acknowledges the processed UUIDs.
-5. Before a model call, the host asks Asper to materialize a bounded context.
-6. Asper combines semantic memory, the current checkpoint and selected exact
+5. Before a model call, the host asks ⁂ asper to materialize a bounded context.
+6. ⁂ asper combines semantic memory, the current checkpoint and selected exact
    events within the supplied token budgets.
 7. The model receives that temporary view; the source store remains unchanged.
 
@@ -127,7 +132,7 @@ The output has two zones:
 
 Selection is deterministic. Whole records and whole events are admitted when
 they fit; arbitrary text truncation is avoided because a broken half-fact is
-often worse than an omitted fact. When no tokenizer is supplied, Asper uses a
+often worse than an omitted fact. When no tokenizer is supplied, ⁂ asper uses a
 deterministic conservative heuristic.
 
 Materialization never mutates or deletes source data. A smaller context is only
@@ -151,7 +156,7 @@ materialization injects the records themselves.
 
 ## 8. Performance strategy
 
-Asper keeps the synchronous path intentionally small:
+⁂ asper keeps the synchronous path intentionally small:
 
 - event appends are sequential framed writes;
 - curation and maintenance run on a worker thread;
@@ -163,14 +168,14 @@ Asper keeps the synchronous path intentionally small:
 - access updates are batched before persistence;
 - compaction rewrites derived state atomically instead of blocking every read.
 
-When embedded in asngn, curator and embedding models borrow its process-wide
-asmodel manager. Backend residency is shared; the current wrapper serializes requests to a backend.
+When embedded in ⁂ asngn, curator and embedding models borrow its process-wide
+⁂ asmodel manager. Backend residency is shared; the current wrapper serializes requests to a backend.
 Shared residency does not provide native multi-sequence decoding.
-Standalone Asper can own a manager and retain the same behavior.
+Standalone ⁂ asper can own a manager and retain the same behavior.
 
 ## 9. Token economy without information loss
 
-Asper reduces model input, not stored knowledge.
+⁂ asper reduces model input, not stored knowledge.
 
 - Semantic records turn repeated conversations into concise reusable facts.
 - Query-directed retrieval injects relevant memory instead of the entire store.
@@ -190,7 +195,7 @@ for recall, reopening or future rematerialization.
 ## 10. How this helps small language models
 
 Small models have less contextual capacity and are more easily distracted by
-irrelevant history. Asper increases their effective capability in four ways:
+irrelevant history. ⁂ asper increases their effective capability in four ways:
 
 1. **Continuity:** identity and project facts survive beyond a context window.
 2. **Focus:** retrieval places a small set of relevant facts near the task.
@@ -223,12 +228,12 @@ inference availability.
 
 ## 12. Model execution
 
-Curator and embedding roles use asmodel. They can run through embedded
+Curator and embedding roles use ⁂ asmodel. They can run through embedded
 llama.cpp or explicit remote profiles for llama.cpp server, LM Studio, vLLM and
-generic endpoints. Provider details stay below the Asper memory API.
+generic endpoints. Provider details stay below the ⁂ asper memory API.
 
 Model-controlled calls in the embedded llama.cpp adapter are contained at its
-C++ boundary so exceptions become normal Asper errors rather than terminating
+C++ boundary so exceptions become normal ⁂ asper errors rather than terminating
 the host process.
 
 ## 13. Fundamental invariants
@@ -242,7 +247,7 @@ The implementation must preserve these rules:
 5. Context materialization never deletes or rewrites source information.
 6. Checkpoint replacement is atomic and also recorded as an event.
 7. Objects are addressed by content and support lossless range reads.
-8. Durable memory and compaction belong to Asper, not to its hosts.
+8. Durable memory and compaction belong to ⁂ asper, not to its hosts.
 9. Token budgets select information; they do not redefine truth.
 
 ## 14. Public surfaces
@@ -285,8 +290,8 @@ callers must reconcile the event log rather than blindly retry the operation.
 ### Model output contracts
 
 Curation, review and recall pass an explicit kind and handle set to the shared
-model adapter. The owner compiles both GBNF and JSON Schema. `asmodel` returns the
-selected encoding without application-specific interpretation; Asper validates
+model adapter. The owner compiles both GBNF and JSON Schema. ⁂ asmodel returns the
+selected encoding without application-specific interpretation; ⁂ asper validates
 the single JSON `output` property before interpreting operations. Duplicate keys,
 binary payloads and trailing properties are rejected. `asper_models_bind` checks
 the shared runtime ABI before using its provider structures.

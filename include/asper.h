@@ -1,5 +1,5 @@
 /*
- * asper.h — Asterism Persistence ("Asper")
+ * asper.h — ⁂ asper — ⁂ asterism persistence
  *
  * An identitarian memory system for small LLMs.
  * Public C API of libasper.
@@ -71,7 +71,7 @@ typedef enum {
 
 /* Events are the immutable source of truth.  Curated records, checkpoints,
  * summaries and embeddings are derived views and may always be rebuilt from
- * this log.  Scopes are host-defined stable slugs (for example an ASNGN
+ * this log.  Scopes are host-defined stable slugs (for example an ⁂ asngn
  * session id). */
 typedef enum {
   ASPER_EVENT_USER = 0,

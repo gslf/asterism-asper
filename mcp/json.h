@@ -2,7 +2,7 @@
  * json.h — strict RFC 8259 JSON codec for asper-mcp.
  *
  * DOM-style value tree. In-house by design: JSON exists only in the MCP
- * layer; the rest of Asper speaks xCDN.
+ * layer; the rest of ⁂ asper speaks xCDN.
  *
  * Guarantees:
  *   - Strict parsing: UTF-8 only (validated), \uXXXX escapes with surrogate

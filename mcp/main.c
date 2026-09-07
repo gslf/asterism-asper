@@ -12,7 +12,7 @@
  *     Methods under "notifications/" are ignored only when the id is
  *     absent; with an id they dispatch normally (unknown => -32601).
  *   - Tool results: {content:[{type:"text",text:<compact JSON payload>}],
- *     isError:bool}. Asper failures set isError:true with payload
+ *     isError:bool}. ⁂ asper failures set isError:true with payload
  *     {"error":"ASPER_ERR_...","message":"..."}.
  *   - Record timestamps are integer unix seconds (UTC) in the fields
  *     created_at_unix / updated_at_unix / last_access_unix (the library
@@ -36,7 +36,7 @@ static const char USAGE[] =
     "       asper-mcp --help | --version\n";
 
 static const char HELP[] =
-    "asper-mcp - MCP stdio server for Asper (Asterism Persistence)\n"
+    "asper-mcp - MCP stdio server for asper\n"
     "\n"
     "usage: asper-mcp --root <dir> [--config <file>]\n"
     "       asper-mcp --help | --version\n"
@@ -92,6 +92,7 @@ static int decorate_modern_result(jx_value *result) {
   info = jx_object();
   ok = (meta != NULL && info != NULL);
   ok &= jx_object_set(info, "name", jx_string("asper-mcp")) == 0;
+  ok &= jx_object_set(info, "title", jx_string("asper")) == 0;
   ok &= jx_object_set(info, "version", jx_string(asper_version())) == 0;
   ok &= jx_object_set(meta, "io.modelcontextprotocol/serverInfo", info) == 0;
   ok &= jx_object_set(result, "resultType", jx_string("complete")) == 0;
@@ -904,6 +905,7 @@ static jx_value *initialize_result(void) {
   ok &= jx_object_set(res, "capabilities", caps) == 0;
   si = jx_object();
   ok &= jx_object_set(si, "name", jx_string("asper-mcp")) == 0;
+  ok &= jx_object_set(si, "title", jx_string("asper")) == 0;
   ok &= jx_object_set(si, "version", jx_string(asper_version())) == 0;
   ok &= jx_object_set(res, "serverInfo", si) == 0;
   if (!ok) {
@@ -924,7 +926,7 @@ static jx_value *discover_result(void) {
   ok &= jx_object_set(res, "supportedVersions", versions) == 0;
   ok &= jx_object_set(res, "capabilities", caps) == 0;
   ok &= jx_object_set(res, "instructions",
-                      jx_string("Persistent memory tools for Asper.")) == 0;
+                      jx_string("Persistent memory tools for asper.")) == 0;
   ok &= jx_object_set(res, "ttlMs", jx_int(3600000)) == 0;
   ok &= jx_object_set(res, "cacheScope", jx_string("private")) == 0;
   if (!ok) {

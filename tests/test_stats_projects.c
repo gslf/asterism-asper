@@ -156,7 +156,7 @@ TEST(stats_counters_lifecycle) {
   ASSERT_OK(asper_memory_insert(c, ASPER_SECTION_CONTEXT, NULL,
                                 "Context fact two", 0, id_c2));
   ASSERT_OK(asper_memory_insert(c, ASPER_SECTION_IDENTITY, NULL,
-                                "You are Asper", 0, id_i));
+                                "You are asper", 0, id_i));
   ASSERT_OK(asper_project_select(c, "thesis"));
   ASSERT_OK(asper_memory_insert(c, ASPER_SECTION_PROJECT, "thesis",
                                 "Thesis chapter due", 0, id_p));

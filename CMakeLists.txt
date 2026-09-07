@@ -17,7 +17,7 @@ if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Release)
 endif()
 
-# Strict flags apply to Asper translation units only (deps use their own).
+# Strict flags apply to ⁂ asper translation units only (deps use their own).
 if(MSVC)
   # /utf-8: the sources are UTF-8 (section banners in comments). Without it
   # MSVC decodes them in the runner's ANSI codepage, which raises C4819 on
@@ -63,7 +63,7 @@ endif()
 # xCDN-C: official parser/serializer for all persistent text. With
 # tests enabled its own test/example targets build too (its add_test entries
 # are registered either way, so they must be buildable to run).
-# Guarded so an embedding host (e.g. asngn) that already provides the xcdn
+# Guarded so an embedding host (e.g. ⁂ asngn) that already provides the xcdn
 # target can add this project via add_subdirectory without a collision.
 set(ASPER_XCDN_DIR "${CMAKE_CURRENT_SOURCE_DIR}/deps/xcdn-c" CACHE PATH "Path to the pinned xcdn source")
 if(NOT TARGET xcdn)

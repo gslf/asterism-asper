@@ -2,7 +2,7 @@
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "asper",
   "version": "0.1.0",
-  "description": "Identitarian long-term memory for LLM agents: local, offline, self-curated. Exposes the asper-mcp memory server plus a skill teaching the memory workflow.",
+  "description": "asper: durable memory and bounded context for LLM workflows, with local storage and local or remote inference. Exposes the asper-mcp memory server plus a skill teaching the memory workflow.",
   "author": {
     "name": "Gioele Stefano Luca Fierro",
     "url": "https://github.com/gslf"

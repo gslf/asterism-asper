@@ -15,7 +15,7 @@
 
 #define T0 1785319920LL /* 2026-07-29T10:12:00Z */
 
-#define I1 "You are Asper, a careful assistant."
+#define I1 "You are asper, a careful assistant."
 #define I2 "You answer briefly and precisely."
 #define C1 "The user drinks green tea every morning."
 #define C2 "The user prefers strong coffee at work."
