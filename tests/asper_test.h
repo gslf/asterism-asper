@@ -33,6 +33,7 @@
 #include <string.h>
 
 #include "asper.h"
+#include "os.h"
 
 #if defined(_WIN32)
 #include <windows.h>
@@ -120,7 +121,30 @@ static int asper_test_case_failed = 0;
     }                                                                       \
   } while (0)
 
-/* Fresh private temp directory; 1 on success. out must hold 256 bytes. */
+/* Match the store's root resolution before tests use protected file I/O.
+ * macOS /tmp and Windows short temp paths may name an alias of the root. */
+static int asper_test_resolve_tmpdir(char out[256]) {
+  char *canonical = NULL;
+  if (os_directory_canonical(out, &canonical) != ASPER_OK ||
+      strlen(canonical) >= 256) {
+    free(canonical);
+#if defined(_WIN32)
+    _rmdir(out);
+#else
+    rmdir(out);
+#endif
+    return 0;
+  }
+  strcpy(out, canonical);
+  free(canonical);
+#if defined(_WIN32)
+  for (char *p = out; *p; p++)
+    if (*p == '\\') *p = '/';
+#endif
+  return 1;
+}
+
+/* Fresh private canonical temp directory; 1 on success. out holds 256 bytes. */
 static int asper_test_tmpdir(char out[256]) {
 #if defined(_WIN32)
   char base[MAX_PATH];
@@ -137,14 +161,18 @@ static int asper_test_tmpdir(char out[256]) {
   for (p = base; *p; p++)
     if (*p == '\\') *p = '/';
   for (tries = 0; tries < 100; tries++) {
-    snprintf(out, 256, "%sasper_test_%08x_%u", base,
-             (unsigned)GetTickCount() ^ ((unsigned)rand() << 12), tries);
-    if (_mkdir(out) == 0) return 1;
+    int length = snprintf(out, 256, "%sasper_test_%08x_%u", base,
+                          (unsigned)GetTickCount() ^ ((unsigned)rand() << 12), tries);
+    if (length < 0 || length >= 256) return 0;
+    if (_mkdir(out) == 0) return asper_test_resolve_tmpdir(out);
   }
   return 0;
 #else
-  snprintf(out, 256, "%s", "/tmp/asper_test_XXXXXX");
-  return mkdtemp(out) != NULL;
+  const char *base = getenv("TMPDIR");
+  if (!base || !*base) base = "/tmp";
+  int length = snprintf(out, 256, "%s/asper_test_XXXXXX", base);
+  if (length < 0 || length >= 256 || !mkdtemp(out)) return 0;
+  return asper_test_resolve_tmpdir(out);
 #endif
 }
 

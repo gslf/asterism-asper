@@ -23,6 +23,7 @@ else()
 endif()
 
 set(ASPER_TEST_PROGRAMS
+  test_os_files
   test_storage_durability
   test_knowledge
   test_hybrid_evidence
